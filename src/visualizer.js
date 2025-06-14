@@ -6,29 +6,44 @@ import Utils from "./utils";
 import loadPresetFunctionsBuffer from "./assemblyscript/presetFunctions.ts";
 
 export default class Visualizer {
-  constructor(audioContext, canvas, opts) {
+  constructor(audioContext, canvas, opts, externalGl = null) {
     this.opts = opts;
     this.audio = new AudioProcessor(audioContext);
 
     const vizWidth = opts.width || 1200;
     const vizHeight = opts.height || 900;
-    if (window.OffscreenCanvas) {
-      this.internalCanvas = new OffscreenCanvas(vizWidth, vizHeight);
+    
+    if (externalGl) {
+      // Use external WebGL2RenderingContext
+      this.gl = externalGl;
+      this.internalCanvas = null; // No internal canvas needed
+      this.usingExternalGl = true;
     } else {
-      this.internalCanvas = document.createElement("canvas");
-      this.internalCanvas.width = vizWidth;
-      this.internalCanvas.height = vizHeight;
+      // Create internal canvas and context (original behavior)
+      if (window.OffscreenCanvas) {
+        this.internalCanvas = new OffscreenCanvas(vizWidth, vizHeight);
+      } else {
+        this.internalCanvas = document.createElement("canvas");
+        this.internalCanvas.width = vizWidth;
+        this.internalCanvas.height = vizHeight;
+      }
+
+      this.gl = this.internalCanvas.getContext("webgl2", {
+        alpha: false,
+        antialias: false,
+        depth: false,
+        stencil: false,
+        premultipliedAlpha: false,
+      });
+      this.usingExternalGl = false;
     }
 
-    this.gl = this.internalCanvas.getContext("webgl2", {
-      alpha: false,
-      antialias: false,
-      depth: false,
-      stencil: false,
-      premultipliedAlpha: false,
-    });
-
-    this.outputGl = canvas.getContext('2d');
+    // Only create output context if using internal canvas
+    if (!this.usingExternalGl && canvas) {
+      this.outputGl = canvas.getContext('2d');
+    } else {
+      this.outputGl = null;
+    }
 
     this.baseValsDefaults = {
       decay: 0.98,
@@ -274,7 +289,9 @@ export default class Visualizer {
   }
 
   loseGLContext() {
-    this.gl.getExtension("WEBGL_lose_context").loseContext();
+    if (!this.usingExternalGl) {
+      this.gl.getExtension("WEBGL_lose_context").loseContext();
+    }
     this.outputGl = null;
   }
 
@@ -748,8 +765,10 @@ export default class Visualizer {
   }
 
   setRendererSize(width, height, opts = {}) {
-    this.internalCanvas.width = width;
-    this.internalCanvas.height = height;
+    if (this.internalCanvas) {
+      this.internalCanvas.width = width;
+      this.internalCanvas.height = height;
+    }
     this.renderer.setRendererSize(width, height, opts);
   }
 
@@ -765,10 +784,11 @@ export default class Visualizer {
     this.outputGl = canvas.getContext('2d');
   }
 
-  render(opts) {
-    const renderOutput = this.renderer.render(opts);
+  render(opts = {}) {
+    const renderToScreen = opts.renderToScreen !== false;
+    const renderOutput = this.renderer.render(opts, renderToScreen);
 
-    if (this.outputGl) {
+    if (this.outputGl && this.internalCanvas && renderToScreen) {
       this.outputGl.drawImage(this.internalCanvas, 0, 0);
     }
 

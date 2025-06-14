@@ -6,4 +6,8 @@ export default class Butterchurn {
   static createVisualizer(context, canvas, opts) {
     return new Visualizer(context, canvas, opts);
   }
+
+  static createVisualizerWithExternalGL(context, gl, opts) {
+    return new Visualizer(context, null, opts, gl);
+  }
 }

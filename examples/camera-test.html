@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Butterchurn Camera Test</title>
+    <style>
+        body { margin: 0; background-color: #000; font-family: Arial, sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        .controls {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            z-index: 1000;
+        }
+        .controls button {
+            margin: 5px;
+            padding: 8px 12px;
+            background: #333;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .controls button:hover {
+            background: #555;
+        }
+        .controls button.active {
+            background: #007acc;
+        }
+        .controls select {
+            margin: 5px;
+            padding: 5px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <div class="controls">
+        <div>
+            <button id="toggleCamera" class="active">Camera: ON</button>
+            <button id="toggleVisualizer" class="active">Visualizer: ON</button>
+        </div>
+        <div>
+            <label>Blend Mode:</label>
+            <select id="blendMode">
+                <option value="multiply">Multiply</option>
+                <option value="add">Add</option>
+                <option value="screen">Screen</option>
+                <option value="overlay">Overlay</option>
+                <option value="camera-only">Camera Only</option>
+                <option value="visualizer-only">Visualizer Only</option>
+                <option value="test-pattern">Test Pattern</option>
+                <option value="debug-camera">Debug Camera</option>
+                <option value="test-image">Test Image</option>
+            </select>
+        </div>
+        <div>
+            <button id="debugInfo">Show Debug Info</button>
+            <button id="simpleTest">Simple Texture Test</button>
+        </div>
+    </div>
+
+    <script src="../dist/butterchurn.min.js"></script>
+    <script src="camera-test.js"></script>
+</body>
+</html> 

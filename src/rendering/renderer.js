@@ -82,9 +82,9 @@ export default class Renderer {
       this.gl.getExtension("MOZ_EXT_texture_filter_anisotropic") ||
       this.gl.getExtension("WEBKIT_EXT_texture_filter_anisotropic");
 
-    this.bindFrameBufferTexture(this.prevFrameBuffer, this.prevTexture);
-    this.bindFrameBufferTexture(this.targetFrameBuffer, this.targetTexture);
-    this.bindFrameBufferTexture(this.compFrameBuffer, this.compTexture);
+    this.bindFrameBufferTexture(this.prevFrameBuffer, this.prevTexture, this.texsizeX, this.texsizeY);
+    this.bindFrameBufferTexture(this.targetFrameBuffer, this.targetTexture, this.texsizeX, this.texsizeY);
+    this.bindFrameBufferTexture(this.compFrameBuffer, this.compTexture, this.texsizeX, this.texsizeY);
 
     const params = {
       pixelRatio: this.pixelRatio,
@@ -298,21 +298,24 @@ export default class Renderer {
       this.texsizeX > this.texsizeY ? this.texsizeY / this.texsizeX : 1;
 
     if (this.texsizeX !== oldTexsizeX || this.texsizeY !== oldTexsizeY) {
-      // copy target texture, because we flip prev/target at start of render
-      const targetTextureNew = this.gl.createTexture();
-      this.bindFrameBufferTexture(this.targetFrameBuffer, targetTextureNew);
-      this.bindFrambufferAndSetViewport(
-        this.targetFrameBuffer,
-        this.texsizeX,
-        this.texsizeY
-      );
+      // preserve the content of targetTexture by resampling into a new texture
+      const oldTargetTexture = this.targetTexture;
+      const newTargetTexture = this.gl.createTexture();
+      this.bindFrameBufferTexture(this.targetFrameBuffer, newTargetTexture, this.texsizeX, this.texsizeY);
+      this.bindFrambufferAndSetViewport(this.targetFrameBuffer, this.texsizeX, this.texsizeY);
 
-      this.resampleShader.renderQuadTexture(this.targetTexture);
+      this.resampleShader.renderQuadTexture(oldTargetTexture);
+      this.gl.deleteTexture(oldTargetTexture);
+      this.targetTexture = newTargetTexture;
 
-      this.targetTexture = targetTextureNew;
+      // re-create other textures at the new size
+      this.gl.deleteTexture(this.prevTexture);
+      this.prevTexture = this.gl.createTexture();
+      this.bindFrameBufferTexture(this.prevFrameBuffer, this.prevTexture, this.texsizeX, this.texsizeY);
 
-      this.bindFrameBufferTexture(this.prevFrameBuffer, this.prevTexture);
-      this.bindFrameBufferTexture(this.compFrameBuffer, this.compTexture);
+      this.gl.deleteTexture(this.compTexture);
+      this.compTexture = this.gl.createTexture();
+      this.bindFrameBufferTexture(this.compFrameBuffer, this.compTexture, this.texsizeX, this.texsizeY);
     }
 
     this.updateGlobals();
@@ -724,37 +727,9 @@ export default class Renderer {
   }
 
   static getBlurValues(mdVSFrame) {
-    let blurMin1 = mdVSFrame.b1n;
-    let blurMin2 = mdVSFrame.b2n;
-    let blurMin3 = mdVSFrame.b3n;
-    let blurMax1 = mdVSFrame.b1x;
-    let blurMax2 = mdVSFrame.b2x;
-    let blurMax3 = mdVSFrame.b3x;
-
-    const fMinDist = 0.1;
-    if (blurMax1 - blurMin1 < fMinDist) {
-      const avg = (blurMin1 + blurMax1) * 0.5;
-      blurMin1 = avg - fMinDist * 0.5;
-      blurMax1 = avg - fMinDist * 0.5;
-    }
-    blurMax2 = Math.min(blurMax1, blurMax2);
-    blurMin2 = Math.max(blurMin1, blurMin2);
-    if (blurMax2 - blurMin2 < fMinDist) {
-      const avg = (blurMin2 + blurMax2) * 0.5;
-      blurMin2 = avg - fMinDist * 0.5;
-      blurMax2 = avg - fMinDist * 0.5;
-    }
-    blurMax3 = Math.min(blurMax2, blurMax3);
-    blurMin3 = Math.max(blurMin2, blurMin3);
-    if (blurMax3 - blurMin3 < fMinDist) {
-      const avg = (blurMin3 + blurMax3) * 0.5;
-      blurMin3 = avg - fMinDist * 0.5;
-      blurMax3 = avg - fMinDist * 0.5;
-    }
-
     return {
-      blurMins: [blurMin1, blurMin2, blurMin3],
-      blurMaxs: [blurMax1, blurMax2, blurMax3],
+      blurMins: [mdVSFrame.b1n, mdVSFrame.b2n, mdVSFrame.b3n],
+      blurMaxs: [mdVSFrame.b1x, mdVSFrame.b2x, mdVSFrame.b3x],
     };
   }
 
@@ -763,23 +738,10 @@ export default class Renderer {
     this.gl.viewport(0, 0, width, height);
   }
 
-  bindFrameBufferTexture(targetFrameBuffer, targetTexture) {
+  bindFrameBufferTexture(targetFrameBuffer, targetTexture, width, height) {
     this.gl.bindTexture(this.gl.TEXTURE_2D, targetTexture);
 
-    this.gl.pixelStorei(this.gl.UNPACK_ALIGNMENT, 1);
-    this.gl.texImage2D(
-      this.gl.TEXTURE_2D,
-      0,
-      this.gl.RGBA,
-      this.texsizeX,
-      this.texsizeY,
-      0,
-      this.gl.RGBA,
-      this.gl.UNSIGNED_BYTE,
-      new Uint8Array(this.texsizeX * this.texsizeY * 4)
-    );
-
-    this.gl.generateMipmap(this.gl.TEXTURE_2D);
+    this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, width, height, 0, this.gl.RGBA, this.gl.UNSIGNED_BYTE, null);
 
     this.gl.texParameteri(
       this.gl.TEXTURE_2D,
@@ -794,7 +756,7 @@ export default class Renderer {
     this.gl.texParameteri(
       this.gl.TEXTURE_2D,
       this.gl.TEXTURE_MIN_FILTER,
-      this.gl.LINEAR_MIPMAP_LINEAR
+      this.gl.LINEAR
     );
     this.gl.texParameteri(
       this.gl.TEXTURE_2D,
@@ -822,7 +784,7 @@ export default class Renderer {
     );
   }
 
-  render({ audioLevels, elapsedTime } = {}) {
+  render({ audioLevels, elapsedTime, renderToScreen } = {}) {
     this.calcTimeAndFPS(elapsedTime);
     this.frameNum += 1;
 
@@ -1103,7 +1065,15 @@ export default class Renderer {
     this.mdVSFrame = mdVSFrame;
     this.mdVSFrameMixed = mdVSFrameMixed;
 
-    this.renderToScreen();
+    if (renderToScreen) {
+      this.renderToScreen();
+    }
+
+    return {
+      globalVars,
+      mdVSFrame,
+      mdVSFrameMixed,
+    };
   }
 
   renderToScreen() {
@@ -1198,7 +1168,7 @@ export default class Renderer {
     const compFrameBuffer = this.gl.createFramebuffer();
     const compTexture = this.gl.createTexture();
 
-    this.bindFrameBufferTexture(compFrameBuffer, compTexture);
+    this.bindFrameBufferTexture(compFrameBuffer, compTexture, this.texsizeX, this.texsizeY);
 
     const { blurMins, blurMaxs } = Renderer.getBlurValues(this.mdVSFrameMixed);
     this.compShader.renderQuadTexture(
