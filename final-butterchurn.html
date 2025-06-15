@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Butterchurn - Full Regl Renderer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
+        }
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        .ui-container {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            max-width: 380px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        h1 {
+            font-size: 20px;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4, #45b7d1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        p { font-size: 13px; color: rgba(255,255,255,0.7); margin-bottom: 15px; }
+        .preset-button {
+            display: block; width: 100%; padding: 12px; margin: 8px 0;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            border: none; border-radius: 8px; color: white; font-weight: bold;
+            cursor: pointer; transition: all 0.2s ease; font-size: 14px;
+        }
+        .preset-button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(255, 107, 107, 0.4); }
+        .preset-button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+        .audio-section { margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+        .file-input-wrapper { position: relative; overflow: hidden; display: inline-block; width: 100%; margin-bottom: 10px; }
+        .file-input-wrapper input[type=file] { position: absolute; left: -9999px; }
+        .file-input-label {
+            display: block; padding: 12px; background: rgba(255, 255, 255, 0.1);
+            border: 2px dashed rgba(255, 255, 255, 0.3); border-radius: 8px;
+            text-align: center; cursor: pointer; transition: all 0.2s ease; font-size: 13px;
+        }
+        .file-input-label:hover { background: rgba(255, 255, 255, 0.15); border-color: #4ecdc4; }
+        .audio-controls { display: flex; gap: 8px; margin-top: 10px; }
+        .secondary-button {
+            flex: 1; padding: 10px; background: rgba(255, 255, 255, 0.1);
+            border: none; border-radius: 6px; color: white; cursor: pointer;
+            transition: all 0.2s ease; font-size: 12px;
+        }
+        .secondary-button:hover { background: rgba(255, 255, 255, 0.2); }
+        .status {
+            margin-top: 15px; padding: 12px; background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px; font-size: 12px; border-left: 3px solid #4ecdc4;
+            line-height: 1.4; font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div class="ui-container">
+        <h1>🦋 Final Butterchurn</h1>
+        <p>This version uses the full, authentic Regl rendering pipeline.</p>
+        
+        <button class="preset-button" id="preset1"
+                onclick="loadPreset('experiments/wasm-eel/presets/Flexi - area 51.json')">
+            🚀 Flexi - Area 51
+        </button>
+        
+        <button class="preset-button" id="preset2"
+                onclick="loadPreset('experiments/wasm-eel/presets/_Flexi, martin + geiss - painterly rogue wave strike (color emboss mix).json')">
+            🎨 Painterly Rogue Wave
+        </button>
+        
+        <div class="audio-section">
+            <div class="file-input-wrapper">
+                <input type="file" id="audioFile" accept="audio/*">
+                <label for="audioFile" class="file-input-label">🎵 Choose Audio File</label>
+            </div>
+            <div class="audio-controls">
+                <button class="secondary-button" onclick="window.visualizer.toggleAudio()">▶️ Play/Pause</button>
+                <button class="secondary-button" onclick="window.visualizer.useMicrophone()">🎤 Microphone</button>
+            </div>
+        </div>
+        
+        <div class="status" id="status">Initializing...</div>
+    </div>
+
+    <script src="https://unpkg.com/regl@2.1.0/dist/regl.min.js"></script>
+    <script>
+        class ShaderUtils {
+          static getShaderParts(t) {
+            const sbIndex = t.indexOf("shader_body");
+            if (t && sbIndex > -1) {
+              const beforeShaderBody = t.substring(0, sbIndex);
+              const afterShaderBody = t.substring(sbIndex);
+              const firstCurly = afterShaderBody.indexOf("{");
+              const lastCurly = afterShaderBody.lastIndexOf("}");
+              const shaderBody = afterShaderBody.substring(firstCurly + 1, lastCurly);
+              return [beforeShaderBody, shaderBody.replace(/texture2D/g, "texture")];
+            }
+            return ["", t.replace(/texture2D/g, "texture")];
+          }
+        }
+
+        class ButterchurnPresetLoader {
+            static parsePreset(presetData) {
+                const preset = {
+                    name: presetData.name || 'Unknown Preset',
+                    baseVals: presetData.baseVals || {},
+                    equations: {
+                        init_str: presetData.init_eqs_str || '',
+                        frame_str: presetData.frame_eqs_str || '',
+                        pixel_str: presetData.pixel_eqs_str || ''
+                    },
+                    shaders: {
+                        warp: presetData.warp || '',
+                        comp: presetData.comp || ''
+                    },
+                };
+
+                const commonReplacements = (code_str) => {
+                    if (!code_str) return '';
+                    return code_str
+                        .replace(/a\./g, 'this.')
+                        .replace(/\b(sin|cos|tan|sqrt|abs|pow|exp|log|min|max|sign|floor|ceil|atan|asin|acos|atan2)\b/g, 'Math.$1')
+                        .replace(/div\(([^,]+),([^)]+)\)/g, '(($1)/($2))')
+                        .replace(/if\(([^,]+),([^,]+),([^)]+)\)/g, '(($1)?($2):($3))')
+                        .replace(/above\(([^,]+),([^)]+)\)/g, '(($1)>($2)?1:0)')
+                        .replace(/below\(([^,]+),([^)]+)\)/g, '(($1)<($2)?1:0)')
+                        .replace(/equal\(([^,]+),([^)]+)\)/g, '(($1)==($2)?1:0)');
+                };
+                
+                try {
+                    if (preset.equations.init_str) {
+                      preset.init_eqs = new Function(commonReplacements(preset.equations.init_str));
+                    }
+                    if (preset.equations.frame_str) {
+                      preset.frame_eqs = new Function(commonReplacements(preset.equations.frame_str));
+                    }
+                    if (preset.equations.pixel_str) {
+                      const code = commonReplacements(preset.equations.pixel_str);
+                      preset.pixel_eqs = new Function(code + '; return {x: this.x, y: this.y, zoom: this.zoom, rot: this.rot, warp: this.warp};');
+                    }
+                } catch (e) {
+                    console.error("Error compiling preset equations:", e, commonReplacements(preset.equations.pixel_str));
+                }
+
+                return preset;
+            }
+        }
+
+        class Visualizer {
+            constructor(canvasId, audioContext) {
+                this.canvas = document.getElementById(canvasId);
+                this.regl = createREGL({ canvas: this.canvas, attributes: { antialias: true, depth: false, alpha: false } });
+                this.audioContext = audioContext;
+
+                this.time = 0;
+                this.frameCount = 0;
+                this.preset = {};
+                this.presetVars = {};
+                this.warpUVs = [];
+
+                this.audioAnalyser = this.audioContext.createAnalyser();
+                this.audioAnalyser.fftSize = 2048;
+                this.audioData = new Float32Array(this.audioAnalyser.frequencyBinCount);
+
+                this.updateDimensions();
+                this.initRenderer();
+                this.startRenderLoop();
+            }
+            
+            updateDimensions() {
+                this.canvas.width = this.canvas.clientWidth * window.devicePixelRatio;
+                this.canvas.height = this.canvas.clientHeight * window.devicePixelRatio;
+                this.aspectRatio = this.canvas.width / this.canvas.height;
+            }
+
+            initRenderer() {
+                const meshWidth = 32; // Reduced for performance in JS
+                const meshHeight = 24;
+                this.meshWidth = meshWidth;
+                this.meshHeight = meshHeight;
+                
+                const positions = [];
+                const indices = [];
+                for (let j = 0; j <= meshHeight; j++) {
+                    for (let i = 0; i <= meshWidth; i++) {
+                        positions.push(-1 + (i / meshWidth) * 2, -1 + (j / meshHeight) * 2);
+                    }
+                }
+                for (let j = 0; j < meshHeight; j++) {
+                    for (let i = 0; i < meshWidth; i++) {
+                        const a = j * (meshWidth + 1) + i;
+                        const b = a + 1;
+                        const c = (j + 1) * (meshWidth + 1) + i;
+                        const d = c + 1;
+                        indices.push(a, b, c, b, c, d);
+                    }
+                }
+                
+                this.meshPositions = this.regl.buffer(positions);
+                this.meshIndices = this.regl.elements(indices);
+                
+                // Create initial UV buffer (will be updated, not recreated)
+                const initialUVs = [];
+                for (let j = 0; j <= meshHeight; j++) {
+                    for (let i = 0; i <= meshWidth; i++) {
+                        initialUVs.push(i / meshWidth, j / meshHeight);
+                    }
+                }
+                this.warpUVsBuffer = this.regl.buffer(initialUVs);
+                
+                this.warpFramebuffers = [
+                    this.regl.framebuffer({ color: this.regl.texture({ width: this.canvas.width, height: this.canvas.height }) }),
+                    this.regl.framebuffer({ color: this.regl.texture({ width: this.canvas.width, height: this.canvas.height }) })
+                ];
+                
+                // Create dummy texture for missing samplers
+                this.dummyTexture = this.regl.texture({ width: 1, height: 1, data: [0, 0, 0, 255] });
+                
+                // Initialize framebuffers with black content
+                this.warpFramebuffers.forEach(fbo => {
+                    fbo.use(() => {
+                        this.regl.clear({ color: [0, 0, 0, 1] });
+                    });
+                });
+                
+                // Initialize audio levels
+                this.bassLevel = 0;
+                this.midLevel = 0;
+                this.trebLevel = 0;
+                this.audioLevel = 0;
+                
+                this.warpShader = this.createWarpShader();
+                this.compShader = this.createCompShader();
+            }
+
+            getShaderUniforms() {
+                const baseUniforms = {
+                    time: () => this.time,
+                    frame: () => this.frameCount,
+                    fps: 60,
+                    bass: () => this.bassLevel,
+                    mid: () => this.midLevel,
+                    treb: () => this.trebLevel,
+                    bass_att: () => this.bassLevel,
+                    mid_att: () => this.midLevel,
+                    treb_att: () => this.trebLevel,
+                    vol: () => this.audioLevel,
+                    vol_att: () => this.audioLevel,
+                    resolution: ({viewportWidth, viewportHeight}) => [viewportWidth, viewportHeight],
+                    texsize: ({viewportWidth, viewportHeight}) => [viewportWidth, viewportHeight, 1/viewportWidth, 1/viewportHeight],
+                    aspect: ({viewportWidth, viewportHeight}) => [viewportWidth/viewportHeight, viewportHeight/viewportWidth],
+                };
+                
+                // Add Q variables
+                for(let i=1; i<=32; i++){
+                    baseUniforms[`q${i}`] = () => this.presetVars[`q${i}`] || 0;
+                }
+                return baseUniforms;
+            }
+
+            createWarpShader(shaderText = 'ret = texture(sampler_main, uv).rgb * decay;') {
+                const shaderParts = ShaderUtils.getShaderParts(shaderText);
+                try {
+                    return this.regl({
+                        vert: `
+                            precision mediump float;
+                            attribute vec2 aPos;
+                            attribute vec2 aWarpUv;
+                            varying vec2 uv;
+                            varying vec2 uv_orig;
+                            void main() {
+                                gl_Position = vec4(aPos, 0, 1);
+                                uv = aWarpUv;
+                                uv_orig = aPos * 0.5 + 0.5;
+                            }`,
+                        frag: `
+                            precision mediump float;
+                            varying vec2 uv;
+                            varying vec2 uv_orig;
+                            uniform sampler2D sampler_main;
+                            uniform sampler2D sampler_blur1, sampler_blur2, sampler_blur3;
+                            uniform float time, decay, bass, mid, treb, vol;
+                            void main() {
+                                vec3 ret;
+                                ${shaderParts[1]}
+                                gl_FragColor = vec4(ret, 1.0);
+                            }`,
+                        attributes: {
+                            aPos: this.meshPositions,
+                            aWarpUv: this.warpUVsBuffer
+                        },
+                        uniforms: {
+                            ...this.getShaderUniforms(),
+                            sampler_main: this.regl.prop('texture'),
+                            sampler_blur1: this.dummyTexture,
+                            sampler_blur2: this.dummyTexture,
+                            sampler_blur3: this.dummyTexture,
+                            decay: () => this.presetVars.decay || 0.98,
+                        },
+                        elements: this.meshIndices,
+                        depth: { enable: false },
+                    });
+                } catch (e) {
+                    console.error('Warp shader compilation failed:', e);
+                    document.getElementById('status').textContent = `❌ Warp Shader Error: ${e.message}`;
+                    // Return basic shader as fallback
+                    if (shaderText !== 'ret = texture(sampler_main, uv).rgb * decay;') {
+                        return this.createWarpShader(); // Default shader
+                    } else {
+                        throw e; // Avoid infinite recursion
+                    }
+                }
+            }
+            
+            createCompShader(shaderText = 'ret = texture(sampler_main, uv).rgb;') {
+                 const shaderParts = ShaderUtils.getShaderParts(shaderText);
+                 try {
+                     return this.regl({
+                        vert: `
+                            precision mediump float;
+                            attribute vec2 position;
+                            varying vec2 uv;
+                            void main() {
+                                gl_Position = vec4(position, 0, 1);
+                                uv = position * 0.5 + 0.5;
+                            }`,
+                        frag: `
+                            precision mediump float;
+                            varying vec2 uv;
+                            uniform sampler2D sampler_main;
+                            uniform sampler2D sampler_blur1, sampler_blur2, sampler_blur3;
+                            uniform float time, bass, mid, treb, vol, fshader, gammaAdj;
+                            uniform float echo_zoom, echo_alpha, echo_orientation;
+                            uniform int invert, brighten, darken, solarize;
+                            uniform vec3 hue_shader;
+                            void main() {
+                                vec3 ret;
+                                vec2 uv_orig = uv;
+                                float rad = length(uv - 0.5);
+                                float ang = atan(uv.y - 0.5, uv.x - 0.5);
+                                ${shaderParts[1]}
+                                gl_FragColor = vec4(ret, 1.0);
+                            }`,
+                        attributes: {
+                            position: [[-1,-1],[1,-1],[-1,1],[1,1],[-1,1],[1,-1]]
+                        },
+                        uniforms: {
+                            ...this.getShaderUniforms(),
+                            sampler_main: this.regl.prop('texture'),
+                            sampler_blur1: this.dummyTexture,
+                            sampler_blur2: this.dummyTexture,
+                            sampler_blur3: this.dummyTexture,
+                            gammaAdj: () => this.presetVars.gammaadj || 1.0,
+                            echo_zoom: () => this.presetVars.echo_zoom || 1.0,
+                            echo_alpha: () => this.presetVars.echo_alpha || 0.0,
+                            echo_orientation: () => this.presetVars.echo_orient || 0,
+                            invert: () => this.presetVars.invert || 0,
+                            brighten: () => this.presetVars.brighten || 0,
+                            darken: () => this.presetVars.darken || 0,
+                            solarize: () => this.presetVars.solarize || 0,
+                            hue_shader: [1,1,1],
+                            fshader: () => this.presetVars.fshader || 0,
+                        },
+                        count: 6,
+                        depth: { enable: false },
+                     });
+                 } catch (e) {
+                     console.error('Comp shader compilation failed:', e);
+                     document.getElementById('status').textContent = `❌ Comp Shader Error: ${e.message}`;
+                     // Return basic shader as fallback
+                     if (shaderText !== 'ret = texture(sampler_main, uv).rgb;') {
+                         return this.createCompShader(); // Default shader
+                     } else {
+                         throw e; // Avoid infinite recursion
+                     }
+                 }
+            }
+
+            loadPreset(presetData) {
+                this.preset = ButterchurnPresetLoader.parsePreset(presetData);
+                this.presetVars = { ...this.preset.baseVals };
+                for(let i=1; i<=32; i++) this.presetVars[`q${i}`] = 0;
+
+                if(this.preset.init_eqs) {
+                    this.preset.init_eqs.call(this.presetVars);
+                }
+                
+                this.warpShader = this.createWarpShader(this.preset.shaders.warp);
+                this.compShader = this.createCompShader(this.preset.shaders.comp);
+                
+                document.getElementById('status').textContent = `✅ Loaded: ${this.preset.name}`;
+            }
+
+            runFrameEquations() {
+                this.presetVars.time = this.time;
+                this.presetVars.frame = this.frameCount;
+                this.presetVars.bass = this.bassLevel;
+                this.presetVars.mid = this.midLevel;
+                this.presetVars.treb = this.trebLevel;
+                this.presetVars.bass_att = this.bassLevel;
+                
+                if (this.preset.frame_eqs) {
+                    this.preset.frame_eqs.call(this.presetVars);
+                }
+            }
+
+            runPixelEquations() {
+                const uvs = [];
+                const gridX1 = this.meshWidth + 1;
+                const gridY1 = this.meshHeight + 1;
+
+                for (let j = 0; j < gridY1; j++) {
+                    for (let i = 0; i < gridX1; i++) {
+                        // Set per-vertex variables
+                        this.presetVars.x = i / this.meshWidth;
+                        this.presetVars.y = j / this.meshHeight;
+                        this.presetVars.rad = Math.sqrt(Math.pow(this.presetVars.x - 0.5, 2) + Math.pow(this.presetVars.y - 0.5, 2));
+                        this.presetVars.ang = Math.atan2(this.presetVars.y - 0.5, this.presetVars.x - 0.5);
+                        
+                        // Set base values
+                        this.presetVars.zoom = this.preset.baseVals.zoom || 1.0;
+                        this.presetVars.rot = this.preset.baseVals.rot || 0.0;
+                        this.presetVars.warp = this.preset.baseVals.warp || 0.0;
+                        
+                        let result = {
+                            x: this.presetVars.x,
+                            y: this.presetVars.y,
+                            zoom: this.presetVars.zoom,
+                            rot: this.presetVars.rot,
+                            warp: this.presetVars.warp,
+                        };
+
+                        if(this.preset.pixel_eqs) {
+                            result = { ...result, ...this.preset.pixel_eqs.call(this.presetVars) };
+                        }
+                        
+                        uvs.push(result.x, 1.0 - result.y);
+                    }
+                }
+                // Update existing buffer instead of creating new one
+                this.warpUVsBuffer(uvs);
+            }
+            
+            render() {
+                if (!this.preset.name) return;
+                
+                this.time += 1/60;
+                this.frameCount++;
+                this.updateAudio();
+                
+                this.runFrameEquations();
+                this.runPixelEquations();
+                
+                const readFbo = this.warpFramebuffers[this.frameCount % 2];
+                const writeFbo = this.warpFramebuffers[(this.frameCount + 1) % 2];
+
+                writeFbo.use(() => {
+                    this.regl.clear({ color: [0, 0, 0, 1] });
+                    this.warpShader({
+                        texture: readFbo,
+                    });
+                });
+                
+                this.compShader({ texture: writeFbo });
+            }
+
+            startRenderLoop() {
+                this.regl.frame(() => this.render());
+            }
+            
+            updateAudio() {
+                this.audioAnalyser.getFloatFrequencyData(this.audioData);
+                let bassSum = 0, midSum = 0, trebSum = 0;
+                const bassEnd = Math.floor(this.audioData.length * 0.15);
+                const midEnd = Math.floor(this.audioData.length * 0.4);
+
+                for (let i = 0; i < this.audioData.length; i++) {
+                    const val = (this.audioData[i] + 140) / 140;
+                    if(i < bassEnd) bassSum += val;
+                    else if(i < midEnd) midSum += val;
+                    else trebSum += val;
+                }
+                this.bassLevel = Math.max(0, bassSum / bassEnd);
+                this.midLevel = Math.max(0, midSum / (midEnd - bassEnd));
+                this.trebLevel = Math.max(0, trebSum / (this.audioData.length - midEnd));
+                this.audioLevel = Math.max(0, (this.bassLevel + this.midLevel + this.trebLevel) / 3);
+            }
+
+            connectAudioSource(source) {
+                source.connect(this.audioAnalyser);
+            }
+            
+            toggleAudio() {
+                if (this.audioContext.state === 'suspended') this.audioContext.resume();
+                if (this.currentAudio) {
+                    if (this.currentAudio.paused) this.currentAudio.play();
+                    else this.currentAudio.pause();
+                }
+            }
+            
+            useMicrophone() {
+                navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+                    const source = this.audioContext.createMediaStreamSource(stream);
+                    this.connectAudioSource(source);
+                });
+            }
+        }
+
+        let visualizer;
+
+        window.onload = () => {
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            window.visualizer = new Visualizer('canvas', audioContext);
+            document.getElementById('status').textContent = '✅ Ready! Click a preset to load.';
+        };
+
+        async function loadPreset(path) {
+            document.querySelectorAll('.preset-button').forEach(b => b.disabled = true);
+            document.getElementById('status').textContent = `🔄 Loading ${path.split('/').pop()}...`;
+            try {
+                const res = await fetch(path);
+                const data = await res.json();
+                window.visualizer.loadPreset(data);
+            } catch (e) {
+                document.getElementById('status').textContent = `❌ Error: ${e.message}`;
+            }
+            document.querySelectorAll('.preset-button').forEach(b => b.disabled = false);
+        }
+        
+        document.getElementById('audioFile').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const url = URL.createObjectURL(file);
+                const audio = new Audio(url);
+                visualizer.currentAudio = audio;
+                const source = visualizer.audioContext.createMediaElementSource(audio);
+                visualizer.connectAudioSource(source);
+                source.connect(visualizer.audioContext.destination);
+                document.querySelector('.file-input-label').textContent = `🎵 ${file.name.substring(0,30)}...`;
+            }
+        });
+
+    </script>
+</body>
+</html> 

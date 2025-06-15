@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real Butterchurn Test</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #000;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+        
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            max-width: 350px;
+        }
+        
+        h1 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #4ecdc4;
+        }
+        
+        .preset-button {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 14px;
+        }
+        
+        .preset-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.4);
+        }
+        
+        .preset-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .status {
+            margin-top: 15px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            font-size: 12px;
+            border-left: 3px solid #4ecdc4;
+            line-height: 1.4;
+        }
+        
+        .audio-section {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        
+        .file-input-wrapper input[type=file] {
+            position: absolute;
+            left: -9999px;
+        }
+        
+        .file-input-label {
+            display: block;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 13px;
+        }
+        
+        .file-input-label:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: #4ecdc4;
+        }
+        
+        .audio-controls {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        
+        .secondary-button {
+            flex: 1;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            border-radius: 6px;
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 12px;
+        }
+        
+        .secondary-button:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <div class="controls">
+        <h1>🦋 Real Butterchurn Test</h1>
+        <p style="font-size: 12px; color: rgba(255,255,255,0.7); margin-bottom: 15px;">
+            Testing the actual ReglVisualizer with real presets
+        </p>
+        
+        <button class="preset-button" onclick="loadPreset('experiments/wasm-eel/presets/Flexi - area 51.json')">
+            🚀 Flexi - Area 51
+        </button>
+        
+        <button class="preset-button" onclick="loadPreset('experiments/wasm-eel/presets/_Flexi, martin + geiss - painterly rogue wave strike (color emboss mix).json')">
+            🎨 Painterly Rogue Wave
+        </button>
+        
+        <div class="audio-section">
+            <div class="file-input-wrapper">
+                <input type="file" id="audioFile" accept="audio/*">
+                <label for="audioFile" class="file-input-label">
+                    🎵 Choose Audio File
+                </label>
+            </div>
+            
+            <div class="audio-controls">
+                <button class="secondary-button" onclick="toggleAudio()">▶️ Play/Pause</button>
+                <button class="secondary-button" onclick="useMicrophone()">🎤 Microphone</button>
+            </div>
+        </div>
+        
+        <div class="status" id="status">
+            Initializing ReglVisualizer...
+        </div>
+    </div>
+
+    <!-- Load the ACTUAL Regl system I built -->
+    <script src="https://unpkg.com/regl@2.1.0/dist/regl.min.js"></script>
+    
+    <script type="module">
+        // Import the ACTUAL ReglVisualizer I built
+        import ReglVisualizer from './src/regl/index.js';
+        
+        // Global variables
+        let regl;
+        let visualizer;
+        let audioContext, analyser, currentAudio, isPlaying = false;
+        let audioData = new Float32Array(1024);
+        
+        async function init() {
+            try {
+                updateStatus('🔄 Initializing WebGL and Regl...');
+                
+                const canvas = document.getElementById('canvas');
+                updateCanvas();
+                
+                // Initialize WebGL with Regl
+                regl = createREGL({
+                    canvas: canvas,
+                    attributes: { antialias: true, depth: false, alpha: false }
+                });
+                
+                // Initialize Audio Context
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                // Initialize the ACTUAL ReglVisualizer I built
+                visualizer = new ReglVisualizer(audioContext, regl);
+                
+                updateStatus('✅ ReglVisualizer ready! Click a preset to test');
+                
+                // Setup audio file input
+                document.getElementById('audioFile').addEventListener('change', handleAudioFile);
+                
+            } catch (error) {
+                updateStatus('❌ Initialization failed: ' + error.message);
+                console.error('Init error:', error);
+            }
+        }
+
+        async function loadPreset(presetPath) {
+            try {
+                updateStatus(`🔄 Loading ${presetPath.split('/').pop()}...`);
+                
+                // Disable buttons during loading
+                document.querySelectorAll('.preset-button').forEach(btn => btn.disabled = true);
+                
+                // Load the butterchurn JSON directly
+                const response = await fetch(presetPath);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const presetData = await response.json();
+                
+                // Use the ACTUAL loadPreset method I built
+                visualizer.loadPreset(presetData);
+                
+                updateStatus(`✅ Loaded preset successfully!`);
+                console.log('Preset data:', presetData);
+                
+            } catch (error) {
+                updateStatus(`❌ Failed to load preset: ${error.message}`);
+                console.error('Preset load error:', error);
+            } finally {
+                // Re-enable buttons
+                document.querySelectorAll('.preset-button').forEach(btn => btn.disabled = false);
+            }
+        }
+
+        function updateCanvas() {
+            const canvas = document.getElementById('canvas');
+            const rect = canvas.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            canvas.style.width = rect.width + 'px';
+            canvas.style.height = rect.height + 'px';
+        }
+
+        // Audio control functions
+        window.toggleAudio = function() {
+            if (audioContext && audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            
+            if (currentAudio) {
+                if (isPlaying) {
+                    currentAudio.pause();
+                    updateStatus('⏸️ Audio paused');
+                } else {
+                    currentAudio.play().catch(error => {
+                        updateStatus('❌ Play failed: ' + error.message);
+                    });
+                    updateStatus('▶️ Audio playing');
+                }
+                isPlaying = !isPlaying;
+            } else {
+                updateStatus('⚠️ No audio loaded');
+            }
+        };
+
+        window.useMicrophone = async function() {
+            try {
+                if (audioContext && audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: { echoCancellation: false, noiseSuppression: false }
+                });
+                
+                // Connect to the visualizer's audio system
+                if (visualizer && visualizer.connectAudio) {
+                    visualizer.connectAudio(stream);
+                } else {
+                    // Fallback connection
+                    const source = audioContext.createMediaStreamSource(stream);
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = 2048;
+                    source.connect(analyser);
+                }
+                
+                updateStatus('🎤 Microphone connected to visualizer');
+                
+            } catch (error) {
+                updateStatus('❌ Microphone access denied: ' + error.message);
+            }
+        };
+
+        async function handleAudioFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            try {
+                if (audioContext && audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                
+                if (currentAudio) {
+                    currentAudio.pause();
+                }
+                
+                const url = URL.createObjectURL(file);
+                currentAudio = new Audio(url);
+                currentAudio.loop = true;
+                currentAudio.volume = 0.8;
+                
+                // Connect to the visualizer's audio system
+                if (visualizer && visualizer.connectAudio) {
+                    const source = audioContext.createMediaElementSource(currentAudio);
+                    visualizer.connectAudio(source);
+                    source.connect(audioContext.destination);
+                } else {
+                    // Fallback connection
+                    const source = audioContext.createMediaElementSource(currentAudio);
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = 2048;
+                    source.connect(analyser);
+                    source.connect(audioContext.destination);
+                }
+                
+                updateStatus(`🎵 ${file.name} connected to visualizer`);
+                
+                currentAudio.play().then(() => {
+                    isPlaying = true;
+                    updateStatus(`▶️ Playing: ${file.name}`);
+                }).catch(() => {
+                    updateStatus('⚠️ Click play to start audio');
+                });
+                
+            } catch (error) {
+                updateStatus('❌ Audio load failed: ' + error.message);
+                console.error('Audio error:', error);
+            }
+        }
+
+        function updateStatus(message) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            console.log('Status:', message);
+        }
+
+        // Event listeners
+        window.addEventListener('resize', updateCanvas);
+        window.addEventListener('click', () => {
+            if (audioContext && audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+        }, { once: true });
+
+        // Initialize when page loads
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html> 

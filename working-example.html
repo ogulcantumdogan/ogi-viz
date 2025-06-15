@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Butterchurn Regl Port - Working Example</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: black;
+            font-family: Arial, sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+        
+        #canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 5px;
+            max-width: 300px;
+        }
+        
+        button {
+            margin: 5px;
+            padding: 8px 15px;
+            background: #333;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        button:hover {
+            background: #555;
+        }
+        
+        button:active {
+            background: #777;
+        }
+        
+        input[type="file"] {
+            margin: 5px 0;
+            width: 100%;
+            font-size: 11px;
+        }
+        
+        .status {
+            margin-top: 10px;
+            font-size: 11px;
+            opacity: 0.8;
+        }
+        
+        .audio-info {
+            margin-top: 5px;
+            font-size: 10px;
+            opacity: 0.6;
+        }
+        
+        h3 {
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <div id="controls">
+        <h3>🎵 Butterchurn Regl</h3>
+        
+        <div>
+            <input type="file" id="audioFile" accept="audio/*">
+        </div>
+        
+        <div>
+            <button onclick="loadDemo()">🎨 Demo</button>
+            <button onclick="loadSpiral()">🌀 Spiral</button>
+            <button onclick="loadPulse()">💓 Pulse</button>
+        </div>
+        
+        <div>
+            <button onclick="toggleAudio()">▶️ Play/Pause</button>
+            <button onclick="useMicrophone()">🎤 Mic</button>
+        </div>
+        
+        <div class="status">
+            <p>Status: <span id="status">Initializing...</span></p>
+            <p>FPS: <span id="fps">0</span></p>
+            <p>Preset: <span id="currentPreset">None</span></p>
+        </div>
+        
+        <div class="audio-info">
+            <p>Audio Level: <span id="audioLevel">0%</span></p>
+            <p>Bass: <span id="bassLevel">0%</span></p>
+        </div>
+    </div>
+
+    <!-- Load Regl -->
+    <script src="https://unpkg.com/regl@2.1.0/dist/regl.min.js"></script>
+    
+    <script>
+        let visualizer, audioContext, currentAudio, isPlaying = false;
+        let frameCount = 0;
+        let lastTime = performance.now();
+        let currentPresetName = "None";
+        
+        // Fixed canvas sizing
+        function resizeCanvas() {
+            const canvas = document.getElementById('canvas');
+            const dpr = window.devicePixelRatio || 1;
+            
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+            canvas.style.width = window.innerWidth + 'px';
+            canvas.style.height = window.innerHeight + 'px';
+            
+            return { width: canvas.width, height: canvas.height, dpr };
+        }
+        
+        // Enhanced audio-reactive visualizer
+        function createWorkingVisualizer(audioContext, regl, opts = {}) {
+            const { width, height } = opts;
+            
+            let time = 0;
+            let audioData = new Float32Array(1024);
+            let audioSource = null;
+            let analyser = null;
+            let currentMode = 'default';
+            
+            // Create multiple visualization modes
+            const modes = {
+                default: createDefaultMode(regl),
+                spiral: createSpiralMode(regl),
+                pulse: createPulseMode(regl)
+            };
+            
+            function createDefaultMode(regl) {
+                return regl({
+                    vert: `
+                        precision mediump float;
+                        attribute vec2 position;
+                        uniform float time;
+                        uniform float audioLevel;
+                        uniform float bassLevel;
+                        varying vec2 vPosition;
+                        
+                        void main() {
+                            vPosition = position;
+                            vec2 pos = position;
+                            
+                            // Wave distortion based on audio
+                            float wave = sin(position.x * 8.0 + time * 2.0) * audioLevel * 0.3;
+                            wave += cos(position.y * 6.0 + time * 1.5) * bassLevel * 0.2;
+                            
+                            pos.x += wave;
+                            pos.y += wave * 0.7;
+                            
+                            gl_Position = vec4(pos, 0, 1);
+                        }
+                    `,
+                    
+                    frag: `
+                        precision mediump float;
+                        uniform float time;
+                        uniform float audioLevel;
+                        uniform float bassLevel;
+                        varying vec2 vPosition;
+                        
+                        void main() {
+                            vec2 center = vec2(0.0);
+                            float dist = length(vPosition - center);
+                            
+                            // Multi-layered audio reactive effects
+                            float pulse = sin(dist * 15.0 - time * 4.0 + audioLevel * 20.0) * 0.5 + 0.5;
+                            float ripple = cos(dist * 25.0 - time * 6.0 + bassLevel * 15.0) * 0.3 + 0.7;
+                            
+                            vec3 color = vec3(
+                                sin(time * 0.5 + vPosition.x * 3.0 + audioLevel * 5.0) * 0.5 + 0.5,
+                                cos(time * 0.7 + vPosition.y * 3.0 + bassLevel * 4.0) * 0.5 + 0.5,
+                                pulse * ripple
+                            );
+                            
+                            // Dynamic brightness
+                            color *= (0.8 + audioLevel * 1.5 + bassLevel * 0.7);
+                            
+                            gl_FragColor = vec4(color, 1.0);
+                        }
+                    `,
+                    
+                    attributes: {
+                        position: [
+                            [-1, -1], [1, -1], [-1, 1],
+                            [-1, 1], [1, -1], [1, 1]
+                        ]
+                    },
+                    
+                    uniforms: {
+                        time: () => time,
+                        audioLevel: () => getAudioLevel(),
+                        bassLevel: () => getBassLevel()
+                    },
+                    
+                    count: 6
+                });
+            }
+            
+            function createSpiralMode(regl) {
+                return regl({
+                    vert: `
+                        precision mediump float;
+                        attribute vec2 position;
+                        uniform float time;
+                        uniform float audioLevel;
+                        varying vec2 vPosition;
+                        
+                        void main() {
+                            vPosition = position;
+                            vec2 pos = position;
+                            
+                            // Spiral distortion
+                            float dist = length(pos);
+                            float angle = atan(pos.y, pos.x);
+                            angle += dist * 5.0 + time * 2.0 + audioLevel * 10.0;
+                            
+                            pos = vec2(cos(angle), sin(angle)) * dist;
+                            pos *= (1.0 + audioLevel * 0.3);
+                            
+                            gl_Position = vec4(pos, 0, 1);
+                        }
+                    `,
+                    
+                    frag: `
+                        precision mediump float;
+                        uniform float time;
+                        uniform float audioLevel;
+                        varying vec2 vPosition;
+                        
+                        void main() {
+                            float dist = length(vPosition);
+                            float angle = atan(vPosition.y, vPosition.x);
+                            
+                            float spiral = sin(dist * 20.0 - angle * 8.0 - time * 5.0) * 0.5 + 0.5;
+                            
+                            vec3 color = vec3(
+                                spiral + audioLevel,
+                                sin(angle + time) * 0.5 + 0.5,
+                                cos(dist * 10.0 + time * 2.0) * 0.5 + 0.5
+                            );
+                            
+                            color *= (1.0 + audioLevel * 2.0);
+                            
+                            gl_FragColor = vec4(color, 1.0);
+                        }
+                    `,
+                    
+                    attributes: {
+                        position: [
+                            [-1, -1], [1, -1], [-1, 1],
+                            [-1, 1], [1, -1], [1, 1]
+                        ]
+                    },
+                    
+                    uniforms: {
+                        time: () => time,
+                        audioLevel: () => getAudioLevel()
+                    },
+                    
+                    count: 6
+                });
+            }
+            
+            function createPulseMode(regl) {
+                return regl({
+                    vert: `
+                        precision mediump float;
+                        attribute vec2 position;
+                        uniform float time;
+                        uniform float audioLevel;
+                        uniform float bassLevel;
+                        varying vec2 vPosition;
+                        
+                        void main() {
+                            vPosition = position;
+                            vec2 pos = position;
+                            
+                            // Pulsing scale based on audio
+                            float scale = 1.0 + sin(time * 10.0) * audioLevel * 0.2;
+                            scale += cos(time * 6.0) * bassLevel * 0.15;
+                            
+                            pos *= scale;
+                            
+                            gl_Position = vec4(pos, 0, 1);
+                        }
+                    `,
+                    
+                    frag: `
+                        precision mediump float;
+                        uniform float time;
+                        uniform float audioLevel;
+                        uniform float bassLevel;
+                        varying vec2 vPosition;
+                        
+                        void main() {
+                            vec2 center = vec2(0.0);
+                            float dist = length(vPosition - center);
+                            
+                            // Concentric circles that pulse with audio
+                            float circles = sin(dist * 30.0 - time * 8.0) * 0.5 + 0.5;
+                            circles *= (1.0 + audioLevel * 3.0);
+                            
+                            float beat = sin(time * 15.0 + bassLevel * 20.0) * 0.3 + 0.7;
+                            
+                            vec3 color = vec3(
+                                circles * beat,
+                                sin(dist * 10.0 + time * 3.0) * 0.5 + 0.5,
+                                cos(time * 4.0 + audioLevel * 8.0) * 0.5 + 0.5
+                            );
+                            
+                            color *= (0.7 + audioLevel * 1.8 + bassLevel * 1.2);
+                            
+                            gl_FragColor = vec4(color, 1.0);
+                        }
+                    `,
+                    
+                    attributes: {
+                        position: [
+                            [-1, -1], [1, -1], [-1, 1],
+                            [-1, 1], [1, -1], [1, 1]
+                        ]
+                    },
+                    
+                    uniforms: {
+                        time: () => time,
+                        audioLevel: () => getAudioLevel(),
+                        bassLevel: () => getBassLevel()
+                    },
+                    
+                    count: 6
+                });
+            }
+            
+            function getAudioLevel() {
+                if (!analyser) return 0.1;
+                
+                analyser.getFloatFrequencyData(audioData);
+                let sum = 0;
+                for (let i = 0; i < audioData.length; i++) {
+                    sum += Math.max(0, (audioData[i] + 140) / 140);
+                }
+                const level = Math.max(0, Math.min(1, sum / audioData.length));
+                
+                // Update UI
+                document.getElementById('audioLevel').textContent = Math.round(level * 100) + '%';
+                
+                return level;
+            }
+            
+            function getBassLevel() {
+                if (!analyser) return 0.1;
+                
+                analyser.getFloatFrequencyData(audioData);
+                let bassSum = 0;
+                const bassEnd = Math.floor(audioData.length * 0.1); // Low frequencies
+                
+                for (let i = 0; i < bassEnd; i++) {
+                    bassSum += Math.max(0, (audioData[i] + 140) / 140);
+                }
+                const bassLevel = Math.max(0, Math.min(1, bassSum / bassEnd));
+                
+                // Update UI
+                document.getElementById('bassLevel').textContent = Math.round(bassLevel * 100) + '%';
+                
+                return bassLevel;
+            }
+            
+            return {
+                connectAudio: function(source) {
+                    audioSource = source;
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = 2048;
+                    analyser.smoothingTimeConstant = 0.8;
+                    audioSource.connect(analyser);
+                    updateStatus('🎵 Audio connected and analyzing');
+                },
+                
+                setMode: function(mode) {
+                    if (modes[mode]) {
+                        currentMode = mode;
+                        currentPresetName = mode.charAt(0).toUpperCase() + mode.slice(1);
+                        document.getElementById('currentPreset').textContent = currentPresetName;
+                        updateStatus(`🎨 Switched to ${currentPresetName} mode`);
+                    }
+                },
+                
+                render: function() {
+                    time += 0.016; // 60fps timing
+                    
+                    regl.clear({
+                        color: [0, 0, 0, 1],
+                        depth: 1
+                    });
+                    
+                    if (modes[currentMode]) {
+                        modes[currentMode]();
+                    }
+                },
+                
+                setRendererSize: function(newWidth, newHeight) {
+                    updateStatus(`📏 Resized to ${newWidth}x${newHeight}`);
+                }
+            };
+        }
+        
+        async function init() {
+            try {
+                updateStatus('🔍 Checking WebGL support...');
+                
+                // Check WebGL support
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                if (!gl) {
+                    throw new Error('WebGL not supported');
+                }
+                
+                updateStatus('✅ WebGL supported');
+                
+                // Create audio context
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                updateStatus('🎧 Audio context created');
+                
+                // Setup canvas with proper sizing
+                const canvasElement = document.getElementById('canvas');
+                const { width, height } = resizeCanvas();
+                
+                // Create Regl instance
+                const regl = createREGL({
+                    canvas: canvasElement,
+                    attributes: {
+                        antialias: true,
+                        depth: false,
+                        stencil: false,
+                        alpha: false,
+                        premultipliedAlpha: false,
+                        preserveDrawingBuffer: false,
+                    },
+                });
+                
+                updateStatus('🎮 Regl instance created');
+                
+                // Create working visualizer
+                visualizer = createWorkingVisualizer(audioContext, regl, {
+                    width,
+                    height
+                });
+                
+                // Set default mode
+                visualizer.setMode('default');
+                
+                updateStatus('✅ Visualizer ready! Load audio or try microphone');
+                
+                // Start render loop
+                startRenderLoop();
+                
+            } catch (error) {
+                console.error('Initialization failed:', error);
+                updateStatus('❌ Init failed: ' + error.message);
+            }
+        }
+        
+        function startRenderLoop() {
+            function render() {
+                frameCount++;
+                const currentTime = performance.now();
+                
+                // Update FPS counter every second
+                if (currentTime - lastTime >= 1000) {
+                    document.getElementById('fps').textContent = frameCount;
+                    frameCount = 0;
+                    lastTime = currentTime;
+                }
+                
+                // Render frame
+                if (visualizer) {
+                    visualizer.render();
+                }
+                
+                requestAnimationFrame(render);
+            }
+            render();
+        }
+        
+        // Control functions
+        window.loadDemo = function() {
+            if (visualizer) {
+                visualizer.setMode('default');
+            }
+        };
+        
+        window.loadSpiral = function() {
+            if (visualizer) {
+                visualizer.setMode('spiral');
+            }
+        };
+        
+        window.loadPulse = function() {
+            if (visualizer) {
+                visualizer.setMode('pulse');
+            }
+        };
+        
+        window.toggleAudio = function() {
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            
+            if (currentAudio) {
+                if (isPlaying) {
+                    currentAudio.pause();
+                    updateStatus('⏸️ Audio paused');
+                } else {
+                    currentAudio.play();
+                    updateStatus('▶️ Audio playing');
+                }
+                isPlaying = !isPlaying;
+            } else {
+                updateStatus('⚠️ No audio loaded - upload a file first');
+            }
+        };
+        
+        window.useMicrophone = async function() {
+            try {
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                });
+                
+                const source = audioContext.createMediaStreamSource(stream);
+                
+                if (visualizer) {
+                    visualizer.connectAudio(source);
+                }
+                
+                updateStatus('🎤 Microphone active - make some noise!');
+            } catch (error) {
+                console.error('Microphone error:', error);
+                updateStatus('❌ Microphone access denied');
+            }
+        };
+        
+        // Audio file handling
+        document.getElementById('audioFile').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                try {
+                    if (audioContext.state === 'suspended') {
+                        await audioContext.resume();
+                    }
+                    
+                    const url = URL.createObjectURL(file);
+                    
+                    // Stop current audio if playing
+                    if (currentAudio) {
+                        currentAudio.pause();
+                        currentAudio = null;
+                    }
+                    
+                    currentAudio = new Audio(url);
+                    currentAudio.loop = true;
+                    currentAudio.crossOrigin = 'anonymous';
+                    currentAudio.volume = 0.7;
+                    
+                    const source = audioContext.createMediaElementSource(currentAudio);
+                    
+                    if (visualizer) {
+                        visualizer.connectAudio(source);
+                    }
+                    
+                    source.connect(audioContext.destination);
+                    
+                    updateStatus('🎵 ' + file.name + ' loaded - click Play!');
+                    
+                } catch (error) {
+                    console.error('Audio load error:', error);
+                    updateStatus('❌ Audio load failed: ' + error.message);
+                }
+            }
+        });
+        
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+            console.log('Status:', message);
+        }
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            const { width, height } = resizeCanvas();
+            if (visualizer && visualizer.setRendererSize) {
+                visualizer.setRendererSize(width, height);
+            }
+        });
+        
+        // Initialize when page loads
+        window.addEventListener('load', init);
+        
+        // Click anywhere to resume audio context (browser requirement)
+        document.addEventListener('click', () => {
+            if (audioContext && audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+        }, { once: true });
+    </script>
+</body>
+</html> 

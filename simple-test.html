@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Butterchurn JSON Test</title>
+    <style>
+        body {
+            background: #222;
+            color: white;
+            font-family: monospace;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        
+        .button {
+            padding: 10px 20px;
+            background: #4ecdc4;
+            border: none;
+            border-radius: 5px;
+            color: white;
+            cursor: pointer;
+            margin: 10px;
+            font-size: 14px;
+        }
+        
+        .button:hover {
+            background: #45b7d1;
+        }
+        
+        .output {
+            background: #333;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            max-height: 500px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-size: 12px;
+        }
+        
+        .success {
+            color: #4ecdc4;
+        }
+        
+        .error {
+            color: #ff6b6b;
+        }
+        
+        .info {
+            color: #feca57;
+        }
+    </style>
+</head>
+<body>
+    <h1>🦋 Simple Butterchurn JSON Test</h1>
+    <p>This test just loads the butterchurn JSON files and shows their structure</p>
+    
+    <button class="button" onclick="testPreset('experiments/wasm-eel/presets/Flexi - area 51.json')">
+        Test Flexi - Area 51
+    </button>
+    
+    <button class="button" onclick="testPreset('experiments/wasm-eel/presets/_Flexi, martin + geiss - painterly rogue wave strike (color emboss mix).json')">
+        Test Painterly Rogue Wave
+    </button>
+    
+    <button class="button" onclick="clearOutput()">Clear Output</button>
+    
+    <div id="output" class="output">Click a button to test loading butterchurn JSON files...</div>
+
+    <script>
+        function log(message, type = 'info') {
+            const output = document.getElementById('output');
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type === 'error' ? 'error' : type === 'success' ? 'success' : 'info';
+            output.innerHTML += `<span class="${className}">[${timestamp}] ${message}</span>\n`;
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function clearOutput() {
+            document.getElementById('output').innerHTML = '';
+        }
+
+        async function testPreset(presetPath) {
+            try {
+                log(`🔄 Loading ${presetPath}...`);
+                
+                const response = await fetch(presetPath);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const presetData = await response.json();
+                
+                log(`✅ Successfully loaded preset!`, 'success');
+                log(`📊 Preset structure analysis:`, 'info');
+                
+                // Analyze the preset structure
+                log(`   - Has baseVals: ${!!presetData.baseVals}`);
+                log(`   - Has shapes: ${presetData.shapes ? presetData.shapes.length : 0} shapes`);
+                log(`   - Has waves: ${presetData.waves ? presetData.waves.length : 0} waves`);
+                log(`   - Has init_eqs_eel: ${!!presetData.init_eqs_eel}`);
+                log(`   - Has frame_eqs_eel: ${!!presetData.frame_eqs_eel}`);
+                log(`   - Has pixel_eqs_eel: ${!!presetData.pixel_eqs_eel}`);
+                log(`   - Has warp shader: ${!!presetData.warp}`);
+                log(`   - Has comp shader: ${!!presetData.comp}`);
+                
+                // Show some key base values
+                if (presetData.baseVals) {
+                    log(`🎛️  Key parameters:`, 'info');
+                    const keyParams = ['decay', 'zoom', 'warp', 'wave_a', 'wave_scale'];
+                    keyParams.forEach(param => {
+                        if (presetData.baseVals[param] !== undefined) {
+                            log(`   - ${param}: ${presetData.baseVals[param]}`);
+                        }
+                    });
+                }
+                
+                // Show equation samples (first 100 chars)
+                if (presetData.frame_eqs_eel) {
+                    const sample = presetData.frame_eqs_eel.substring(0, 100);
+                    log(`🧮 Frame equation sample: "${sample}..."`);
+                }
+                
+                if (presetData.pixel_eqs_eel) {
+                    const sample = presetData.pixel_eqs_eel.substring(0, 100);
+                    log(`🎯 Pixel equation sample: "${sample}..."`);
+                }
+                
+                // Show shader samples
+                if (presetData.warp) {
+                    log(`🌊 Has warp shader (${presetData.warp.length} chars)`);
+                }
+                
+                if (presetData.comp) {
+                    log(`🎨 Has comp shader (${presetData.comp.length} chars)`);
+                }
+                
+                log(`📄 Full JSON structure:`, 'info');
+                log(JSON.stringify(presetData, null, 2));
+                
+            } catch (error) {
+                log(`❌ Error loading preset: ${error.message}`, 'error');
+                console.error('Full error:', error);
+            }
+        }
+    </script>
+</body>
+</html> 

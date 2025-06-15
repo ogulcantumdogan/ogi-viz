@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Butterchurn Regl Port - Simple Example</title>
+    <style>
+        body {
+            margin: 0;
+            background: black;
+            font-family: Arial, sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+        
+        #canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 5px;
+            max-width: 300px;
+        }
+        
+        button {
+            margin: 5px;
+            padding: 8px 15px;
+            background: #333;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background: #555;
+        }
+        
+        input {
+            margin: 5px 0;
+            width: 100%;
+        }
+        
+        .status {
+            margin-top: 10px;
+            font-size: 12px;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <div id="controls">
+        <h3>🎵 Butterchurn Regl</h3>
+        
+        <div>
+            <input type="file" id="audioFile" accept="audio/*" placeholder="Select Audio File">
+        </div>
+        
+        <div>
+            <button onclick="loadDemo()">🎨 Load Demo</button>
+            <button onclick="toggleAudio()">▶️ Play/Pause</button>
+            <button onclick="useMicrophone()">🎤 Use Mic</button>
+        </div>
+        
+        <div class="status">
+            <p>Status: <span id="status">Initializing...</span></p>
+            <p>FPS: <span id="fps">0</span></p>
+        </div>
+    </div>
+
+    <!-- Load Regl -->
+    <script src="https://unpkg.com/regl@2.1.0/dist/regl.min.js"></script>
+    
+    <script>
+        let visualizer, audioContext, currentAudio, isPlaying = false;
+        let frameCount = 0;
+        let lastTime = performance.now();
+        
+        // Simple support check function
+        function isReglSupported() {
+            try {
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                
+                if (!gl) {
+                    return false;
+                }
+                
+                // Check for required extensions
+                const requiredExtensions = [
+                    'OES_texture_float',
+                    'OES_texture_half_float',
+                ];
+                
+                for (const ext of requiredExtensions) {
+                    if (!gl.getExtension(ext)) {
+                        console.warn(`WebGL extension ${ext} not supported`);
+                        return false;
+                    }
+                }
+                
+                return true;
+            } catch (error) {
+                console.error('Error checking Regl support:', error);
+                return false;
+            }
+        }
+        
+        // Simple Regl instance creator
+        function createReglInstance(canvas, opts = {}) {
+            const defaultOpts = {
+                canvas: canvas,
+                attributes: {
+                    antialias: true,
+                    depth: false,
+                    stencil: false,
+                    alpha: true,
+                    premultipliedAlpha: false,
+                    preserveDrawingBuffer: false,
+                },
+                extensions: [
+                    'OES_texture_float',
+                    'OES_texture_half_float',
+                    'WEBGL_color_buffer_float',
+                ],
+                ...opts,
+            };
+            
+            return createREGL(defaultOpts);
+        }
+        
+        // Simple mock visualizer for demonstration
+        function createSimpleVisualizer(audioContext, regl, opts = {}) {
+            const width = opts.width || 800;
+            const height = opts.height || 600;
+            
+            // Create a simple audio-reactive visualization
+            let time = 0;
+            let audioData = new Float32Array(1024);
+            let audioSource = null;
+            let analyser = null;
+            
+            // Simple waving mesh visualization
+            const drawCommand = regl({
+                vert: `
+                    precision mediump float;
+                    attribute vec2 position;
+                    uniform float time;
+                    uniform float audioLevel;
+                    varying vec2 vPosition;
+                    
+                    void main() {
+                        vPosition = position;
+                        vec2 pos = position;
+                        
+                        // Create wave effect based on audio
+                        float wave = sin(position.x * 10.0 + time * 3.0) * audioLevel * 0.1;
+                        wave += cos(position.y * 8.0 + time * 2.0) * audioLevel * 0.08;
+                        
+                        pos.x += wave;
+                        pos.y += wave * 0.5;
+                        
+                        gl_Position = vec4(pos, 0, 1);
+                    }
+                `,
+                
+                frag: `
+                    precision mediump float;
+                    uniform float time;
+                    uniform float audioLevel;
+                    varying vec2 vPosition;
+                    
+                    void main() {
+                        vec2 center = vec2(0.0);
+                        float dist = length(vPosition - center);
+                        
+                        // Create pulsing colors based on audio
+                        float pulse = sin(dist * 20.0 - time * 5.0 + audioLevel * 10.0) * 0.5 + 0.5;
+                        
+                        vec3 color = vec3(
+                            sin(time + vPosition.x * 5.0 + audioLevel) * 0.5 + 0.5,
+                            cos(time + vPosition.y * 5.0 + audioLevel * 2.0) * 0.5 + 0.5,
+                            pulse + audioLevel * 0.5
+                        );
+                        
+                        // Add brightness based on audio
+                        color *= (1.0 + audioLevel * 2.0);
+                        
+                        gl_FragColor = vec4(color, 1.0);
+                    }
+                `,
+                
+                attributes: {
+                    position: [
+                        [-1, -1], [1, -1], [-1, 1],
+                        [-1, 1], [1, -1], [1, 1]
+                    ]
+                },
+                
+                uniforms: {
+                    time: () => time,
+                    audioLevel: () => {
+                        if (analyser) {
+                            analyser.getFloatFrequencyData(audioData);
+                            // Calculate average audio level
+                            let sum = 0;
+                            for (let i = 0; i < audioData.length; i++) {
+                                sum += audioData[i] + 140; // Normalize dB values
+                            }
+                            return Math.max(0, sum / audioData.length / 140);
+                        }
+                        return 0.1; // Default low level
+                    }
+                },
+                
+                count: 6
+            });
+            
+            return {
+                connectAudio: function(source) {
+                    audioSource = source;
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = 2048;
+                    audioSource.connect(analyser);
+                    updateStatus('🎵 Audio connected');
+                },
+                
+                loadPreset: function(preset) {
+                    updateStatus('🎨 Preset loaded: ' + preset.name);
+                    return Promise.resolve();
+                },
+                
+                render: function() {
+                    time += 0.016; // ~60fps
+                    regl.clear({
+                        color: [0, 0, 0, 1],
+                        depth: 1
+                    });
+                    drawCommand();
+                },
+                
+                setRendererSize: function(newWidth, newHeight) {
+                    // Handle resize if needed
+                    updateStatus(`📏 Resized to ${newWidth}x${newHeight}`);
+                }
+            };
+        }
+        
+        async function init() {
+            try {
+                // Check support
+                if (!isReglSupported()) {
+                    throw new Error('WebGL/Regl not supported in this browser');
+                }
+                
+                updateStatus('🔍 WebGL support confirmed');
+                
+                // Create audio context
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                updateStatus('🎧 Audio context created');
+                
+                // Create canvas and Regl
+                const canvas = document.getElementById('canvas');
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                
+                const regl = createReglInstance(canvas);
+                updateStatus('🎮 Regl instance created');
+                
+                // Create simple visualizer
+                visualizer = createSimpleVisualizer(audioContext, regl, {
+                    width: canvas.width,
+                    height: canvas.height
+                });
+                
+                updateStatus('✅ Visualizer initialized');
+                
+                // Start render loop
+                startRenderLoop();
+                
+            } catch (error) {
+                console.error('Initialization failed:', error);
+                updateStatus('❌ Init failed: ' + error.message);
+            }
+        }
+        
+        function startRenderLoop() {
+            function render() {
+                frameCount++;
+                const currentTime = performance.now();
+                
+                // Update FPS counter
+                if (currentTime - lastTime >= 1000) {
+                    document.getElementById('fps').textContent = frameCount;
+                    frameCount = 0;
+                    lastTime = currentTime;
+                }
+                
+                // Render frame
+                if (visualizer) {
+                    visualizer.render();
+                }
+                
+                requestAnimationFrame(render);
+            }
+            render();
+        }
+        
+        // Control functions
+        window.loadDemo = async function() {
+            const demoPreset = {
+                name: "Demo Preset",
+                baseVals: {
+                    decay: 0.98,
+                    wave_mode: 0,
+                    wave_a: 0.8
+                }
+            };
+            
+            if (visualizer) {
+                await visualizer.loadPreset(demoPreset);
+            }
+        };
+        
+        window.toggleAudio = function() {
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            
+            if (currentAudio) {
+                if (isPlaying) {
+                    currentAudio.pause();
+                    updateStatus('⏸️ Audio paused');
+                } else {
+                    currentAudio.play();
+                    updateStatus('▶️ Audio playing');
+                }
+                isPlaying = !isPlaying;
+            } else {
+                updateStatus('⚠️ No audio loaded');
+            }
+        };
+        
+        window.useMicrophone = async function() {
+            try {
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const source = audioContext.createMediaStreamSource(stream);
+                
+                if (visualizer) {
+                    visualizer.connectAudio(source);
+                }
+                
+                updateStatus('🎤 Microphone connected - make some noise!');
+            } catch (error) {
+                console.error('Microphone error:', error);
+                updateStatus('❌ Microphone access denied');
+            }
+        };
+        
+        // Audio file handling
+        document.getElementById('audioFile').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                try {
+                    if (audioContext.state === 'suspended') {
+                        await audioContext.resume();
+                    }
+                    
+                    const url = URL.createObjectURL(file);
+                    currentAudio = new Audio(url);
+                    currentAudio.loop = true;
+                    currentAudio.crossOrigin = 'anonymous';
+                    
+                    const source = audioContext.createMediaElementSource(currentAudio);
+                    
+                    if (visualizer) {
+                        visualizer.connectAudio(source);
+                    }
+                    
+                    source.connect(audioContext.destination);
+                    updateStatus('🎵 Audio file loaded: ' + file.name);
+                    
+                } catch (error) {
+                    console.error('Audio load error:', error);
+                    updateStatus('❌ Audio load failed: ' + error.message);
+                }
+            }
+        });
+        
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+            console.log('Status:', message);
+        }
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            const canvas = document.getElementById('canvas');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            if (visualizer && visualizer.setRendererSize) {
+                visualizer.setRendererSize(canvas.width, canvas.height);
+            }
+        });
+        
+        // Initialize when page loads
+        window.addEventListener('load', init);
+        
+        // Click anywhere to resume audio context (browser requirement)
+        window.addEventListener('click', () => {
+            if (audioContext && audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+        }, { once: true });
+    </script>
+</body>
+</html> 

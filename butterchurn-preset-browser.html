@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Butterchurn Preset Browser</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+        
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+        }
+        
+        .ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+        }
+        
+        .ui-panel {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            pointer-events: auto;
+            transition: all 0.3s ease;
+        }
+        
+        .preset-browser {
+            top: 20px;
+            right: 20px;
+            width: 400px;
+            height: calc(100vh - 40px);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .controls-panel {
+            top: 20px;
+            left: 20px;
+            width: 300px;
+            padding: 20px;
+        }
+        
+        .status-panel {
+            bottom: 20px;
+            left: 20px;
+            width: 300px;
+            padding: 15px;
+        }
+        
+        h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            text-align: center;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4, #45b7d1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #4ecdc4;
+        }
+        
+        h3 {
+            font-size: 14px;
+            margin-bottom: 10px;
+            color: #ff6b6b;
+        }
+        
+        .search-box {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 15px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: white;
+            font-size: 14px;
+        }
+        
+        .search-box::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+        
+        .category-tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .category-tab {
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            border-radius: 20px;
+            color: white;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .category-tab:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .category-tab.active {
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            box-shadow: 0 0 15px rgba(255, 107, 107, 0.5);
+        }
+        
+        .preset-list {
+            flex: 1;
+            overflow-y: auto;
+            margin-bottom: 15px;
+        }
+        
+        .preset-item {
+            padding: 12px;
+            margin-bottom: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border-left: 3px solid transparent;
+        }
+        
+        .preset-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateX(5px);
+        }
+        
+        .preset-item.active {
+            background: rgba(78, 205, 196, 0.2);
+            border-left-color: #4ecdc4;
+            box-shadow: 0 0 15px rgba(78, 205, 196, 0.3);
+        }
+        
+        .preset-name {
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+        
+        .preset-author {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            margin-bottom: 4px;
+        }
+        
+        .preset-description {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.4);
+            line-height: 1.3;
+        }
+        
+        .button {
+            padding: 12px 20px;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin: 5px;
+            font-size: 14px;
+        }
+        
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.4);
+        }
+        
+        .button:active {
+            transform: translateY(0);
+        }
+        
+        .button.secondary {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        .button.secondary:hover {
+            background: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 5px 15px rgba(255, 255, 255, 0.2);
+        }
+        
+        .audio-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            width: 100%;
+            margin-bottom: 15px;
+        }
+        
+        .file-input-wrapper input[type=file] {
+            position: absolute;
+            left: -9999px;
+        }
+        
+        .file-input-label {
+            display: block;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 14px;
+        }
+        
+        .file-input-label:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: #4ecdc4;
+        }
+        
+        .status-info {
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+        
+        .audio-visualizer {
+            width: 100%;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+            margin-top: 10px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .audio-bars {
+            display: flex;
+            height: 100%;
+            align-items: end;
+            gap: 2px;
+            padding: 5px;
+        }
+        
+        .audio-bar {
+            flex: 1;
+            background: linear-gradient(to top, #ff6b6b, #4ecdc4);
+            border-radius: 1px;
+            transition: height 0.1s ease;
+        }
+        
+        .preset-preview {
+            width: 100%;
+            height: 100px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            margin-top: 10px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .rainbow-border {
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4, #45b7d1, #96ceb4, #feca57);
+            background-size: 300% 300%;
+            animation: rainbow 3s ease infinite;
+        }
+        
+        @keyframes rainbow {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        
+        /* Scrollbar styling */
+        .preset-list::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .preset-list::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+        }
+        
+        .preset-list::-webkit-scrollbar-thumb {
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            border-radius: 3px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.5s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <div class="ui-overlay">
+        <!-- Main Preset Browser -->
+        <div class="ui-panel preset-browser">
+            <h1>🎵 Preset Browser</h1>
+            
+            <input type="text" class="search-box" id="searchBox" placeholder="Search presets...">
+            
+            <div class="category-tabs" id="categoryTabs">
+                <button class="category-tab active" data-category="all">All</button>
+                <button class="category-tab" data-category="classic">Classic</button>
+                <button class="category-tab" data-category="abstract">Abstract</button>
+                <button class="category-tab" data-category="geometric">Geometric</button>
+                <button class="category-tab" data-category="psychedelic">Psychedelic</button>
+                <button class="category-tab" data-category="minimal">Minimal</button>
+            </div>
+            
+            <div class="preset-list" id="presetList">
+                <div class="loading">Loading presets...</div>
+            </div>
+            
+            <div class="preset-preview" id="presetPreview">
+                <div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.6);">
+                    Select a preset to see preview
+                </div>
+            </div>
+        </div>
+        
+        <!-- Audio Controls -->
+        <div class="ui-panel controls-panel">
+            <h2>🎧 Audio</h2>
+            
+            <div class="file-input-wrapper">
+                <input type="file" id="audioFile" accept="audio/*">
+                <label for="audioFile" class="file-input-label">
+                    📁 Choose Audio File
+                </label>
+            </div>
+            
+            <div class="audio-controls">
+                <button class="button secondary" onclick="toggleAudio()">▶️ Play/Pause</button>
+                <button class="button secondary" onclick="useMicrophone()">🎤 Microphone</button>
+            </div>
+            
+            <div class="audio-visualizer">
+                <div class="audio-bars" id="audioBars"></div>
+            </div>
+        </div>
+        
+        <!-- Status Panel -->
+        <div class="ui-panel status-panel">
+            <h3>📊 Status</h3>
+            <div class="status-info">
+                <div class="status-row">
+                    <span>Current Preset:</span>
+                    <span id="currentPreset">None</span>
+                </div>
+                <div class="status-row">
+                    <span>FPS:</span>
+                    <span id="fps">0</span>
+                </div>
+                <div class="status-row">
+                    <span>Audio Level:</span>
+                    <span id="audioLevel">0%</span>
+                </div>
+                <div class="status-row">
+                    <span>Status:</span>
+                    <span id="status">Initializing...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/regl@2.1.0/dist/regl.min.js"></script>
+    
+    <script>
+        // Butterchurn-style presets database
+        const presetDatabase = [
+            {
+                name: "Electric Dreams",
+                author: "Classic Collection",
+                category: "classic",
+                description: "Flowing electric patterns with smooth color transitions",
+                data: {
+                    vert: `
+                        precision mediump float;
+                        attribute vec2 position;
+                        uniform float time, audioLevel, bassLevel;
+                        varying vec2 vPos;
+                        
+                        void main() {
+                            vPos = position;
+                            vec2 pos = position;
+                            
+                            float wave = sin(pos.x * 6.0 + time * 1.5) * audioLevel * 0.15;
+                            wave += cos(pos.y * 4.0 + time * 2.0) * bassLevel * 0.1;
+                            
+                            pos += wave;
+                            gl_Position = vec4(pos, 0, 1);
+                        }
+                    `,
+                    frag: `
+                        precision mediump float;
+                        uniform float time, audioLevel;
+                        varying vec2 vPos;
+                        
+                        void main() {
+                            float dist = length(vPos);
+                            float angle = atan(vPos.y, vPos.x);
+                            
+                            vec3 color = vec3(
+                                sin(time + angle * 2.0) * 0.5 + 0.5,
+                                cos(time * 1.3 + dist * 8.0) * 0.5 + 0.5,
+                                sin(time * 0.8 + audioLevel * 5.0) * 0.5 + 0.5
+                            );
+                            
+                            color *= (1.0 + audioLevel);
+                            gl_FragColor = vec4(color, 1.0);
+                        }
+                    `
+                }
+            },
+            
+            {
+                name: "Cosmic Spiral",
+                author: "SpaceViz",
+                category: "abstract",
+                description: "Hypnotic spiral patterns that respond to bass frequencies",
+                data: {
+                    vert: `
+                        precision mediump float;
+                        attribute vec2 position;
+                        uniform float time, audioLevel, bassLevel;
+                        varying vec2 vPos;
+                        
+                        void main() {
+                            vec2 pos = position;
+                            float dist = length(pos);
+                            float angle = atan(pos.y, pos.x);
+                            
+                            angle += dist * 10.0 + time * 2.0 + bassLevel * 12.0;
+                            pos = vec2(cos(angle), sin(angle)) * dist;
+                            
+                            vPos = pos * (1.0 + audioLevel * 0.2);
+                            gl_Position = vec4(vPos, 0, 1);
+                        }
+                    `,
+                    frag: `
+                        precision mediump float;
+                        uniform float time, audioLevel, bassLevel;
+                        varying vec2 vPos;
+                        
+                        void main() {
+                            float dist = length(vPos);
+                            float spiral = sin(dist * 25.0 - time * 6.0) * 0.5 + 0.5;
+                            
+                            vec3 color = vec3(
+                                spiral + bassLevel,
+                                sin(time + dist * 3.0) * 0.5 + 0.5,
+                                cos(time * 1.5 + audioLevel * 8.0) * 0.5 + 0.5
+                            );
+                            
+                            color *= (0.8 + audioLevel * 1.5);
+                            gl_FragColor = vec4(color, 1.0);
+                        }
+                    `
+                }
+            },
+            
+            {
+                name: "Geometric Pulse",
+                author: "ModernFX",
+                category: "geometric",
+                description: "Sharp geometric patterns with rhythmic pulsing",
+                data: {
+                    vert: `
+                        precision mediump float;
+                        attribute vec2 position;
+                        uniform float time, audioLevel, bassLevel;
+                        varying vec2 vPos;
+                        
+                        void main() {
+                            vec2 pos = position;
+                            
+                            float scale = 1.0 + sin(time * 6.0) * audioLevel * 0.2;
+                            scale += cos(time * 4.0) * bassLevel * 0.15;
+                            
+                            pos *= scale;
+                            vPos = pos;
+                            
+                            gl_Position = vec4(pos, 0, 1);
+                        }
+                    `,
+                    frag: `
+                        precision mediump float;
+                        uniform float time, audioLevel, bassLevel;
+                        varying vec2 vPos;
+                        
+                        void main() {
+                            vec2 grid = floor(vPos * 10.0) / 10.0;
+                            float checker = mod(grid.x + grid.y, 0.2);
+                            
+                            float pulse = sin(time * 8.0 + length(vPos) * 15.0) * audioLevel;
+                            
+                            vec3 color = vec3(
+                                checker + pulse,
+                                sin(time + bassLevel * 5.0) * 0.5 + 0.5,
+                                cos(time * 1.2) * 0.5 + 0.5
+                            );
+                            
+                            color *= (1.0 + audioLevel * 2.0);
+                            gl_FragColor = vec4(color, 1.0);
+                        }
+                    `
+                }
+            },
+            
+            {
+                name: "Rainbow Tunnels",
+                author: "PsychedelicFX",
+                category: "psychedelic",
+                description: "Colorful tunnel effect with infinite depth illusion",
+                data: {
+                    vert: `
+                        precision mediump float;
+                        attribute vec2 position;
+                        uniform float time, audioLevel;
+                        varying vec2 vPos;
+                        
+                        void main() {
+                            vPos = position;
+                            vec2 pos = position;
+                            
+                            float tunnel = length(pos);
+                            pos = pos / tunnel * (tunnel + sin(time + audioLevel * 3.0) * 0.1);
+                            
+                            gl_Position = vec4(pos, 0, 1);
+                        }
+                    `,
+                    frag: `
+                        precision mediump float;
+                        uniform float time, audioLevel;
+                        varying vec2 vPos;
+                        
+                        void main() {
+                            float dist = length(vPos);
+                            float tunnel = 1.0 / (dist + 0.1);
+                            
+                            vec3 color = vec3(
+                                sin(tunnel * 5.0 - time * 3.0) * 0.5 + 0.5,
+                                sin(tunnel * 5.0 - time * 3.0 + 2.094) * 0.5 + 0.5,
+                                sin(tunnel * 5.0 - time * 3.0 + 4.188) * 0.5 + 0.5
+                            );
+                            
+                            color *= (tunnel * 0.5 + audioLevel);
+                            gl_FragColor = vec4(color, 1.0);
+                        }
+                    `
+                }
+            },
+            
+            {
+                name: "Minimal Waves",
+                author: "CleanDesign",
+                category: "minimal",
+                description: "Simple, elegant wave patterns with subtle audio response",
+                data: {
+                    vert: `
+                        precision mediump float;
+                        attribute vec2 position;
+                        uniform float time, audioLevel;
+                        varying vec2 vPos;
+                        
+                        void main() {
+                            vPos = position;
+                            vec2 pos = position;
+                            
+                            pos.y += sin(pos.x * 4.0 + time) * audioLevel * 0.1;
+                            
+                            gl_Position = vec4(pos, 0, 1);
+                        }
+                    `,
+                    frag: `
+                        precision mediump float;
+                        uniform float time, audioLevel;
+                        varying vec2 vPos;
+                        
+                        void main() {
+                            float wave = sin(vPos.y * 10.0 + time * 2.0) * 0.5 + 0.5;
+                            
+                            vec3 color = mix(
+                                vec3(0.1, 0.1, 0.2),
+                                vec3(0.8, 0.9, 1.0),
+                                wave * (0.5 + audioLevel)
+                            );
+                            
+                            gl_FragColor = vec4(color, 1.0);
+                        }
+                    `
+                }
+            },
+            
+            {
+                name: "Plasma Storm",
+                author: "RetroVision",
+                category: "classic",
+                description: "Classic plasma effect with modern audio reactivity",
+                data: {
+                    vert: `
+                        precision mediump float;
+                        attribute vec2 position;
+                        uniform float time, audioLevel;
+                        varying vec2 vPos;
+                        
+                        void main() {
+                            vPos = position * (1.0 + audioLevel * 0.1);
+                            gl_Position = vec4(position, 0, 1);
+                        }
+                    `,
+                    frag: `
+                        precision mediump float;
+                        uniform float time, audioLevel;
+                        varying vec2 vPos;
+                        
+                        void main() {
+                            float plasma = sin(vPos.x * 10.0 + time);
+                            plasma += sin(vPos.y * 10.0 + time * 1.5);
+                            plasma += sin((vPos.x + vPos.y) * 10.0 + time * 2.0);
+                            plasma *= 0.5 + audioLevel;
+                            
+                            vec3 color = vec3(
+                                sin(plasma + time) * 0.5 + 0.5,
+                                sin(plasma + time + 2.094) * 0.5 + 0.5,
+                                sin(plasma + time + 4.188) * 0.5 + 0.5
+                            );
+                            
+                            gl_FragColor = vec4(color, 1.0);
+                        }
+                    `
+                }
+            }
+        ];
+        
+        // Global variables
+        let regl, audioContext, analyser, currentAudio, isPlaying = false;
+        let frameCount = 0, lastTime = performance.now();
+        let time = 0, audioData = new Float32Array(1024);
+        let drawCommand, currentPresetData = null;
+        let filteredPresets = [...presetDatabase];
+        
+        // Initialize
+        async function init() {
+            try {
+                updateStatus('Initializing...');
+                
+                const canvas = document.getElementById('canvas');
+                updateCanvas();
+                
+                regl = createREGL({
+                    canvas: canvas,
+                    attributes: { antialias: true, depth: false, alpha: false }
+                });
+                
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                // Load default preset
+                loadPreset(presetDatabase[0]);
+                
+                // Initialize UI
+                setupUI();
+                populatePresetList();
+                createAudioBars();
+                
+                updateStatus('✅ Ready! Upload audio or browse presets');
+                render();
+                
+            } catch (error) {
+                updateStatus('❌ Initialization failed: ' + error.message);
+            }
+        }
+        
+        function setupUI() {
+            // Search functionality
+            document.getElementById('searchBox').addEventListener('input', (e) => {
+                filterPresets(e.target.value, getCurrentCategory());
+            });
+            
+            // Category tabs
+            document.querySelectorAll('.category-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.category-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    filterPresets(document.getElementById('searchBox').value, tab.dataset.category);
+                });
+            });
+            
+            // Audio file upload
+            document.getElementById('audioFile').addEventListener('change', handleAudioFile);
+        }
+        
+        function getCurrentCategory() {
+            return document.querySelector('.category-tab.active').dataset.category;
+        }
+        
+        function filterPresets(searchTerm, category) {
+            filteredPresets = presetDatabase.filter(preset => {
+                const matchesSearch = preset.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                    preset.author.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                    preset.description.toLowerCase().includes(searchTerm.toLowerCase());
+                const matchesCategory = category === 'all' || preset.category === category;
+                return matchesSearch && matchesCategory;
+            });
+            populatePresetList();
+        }
+        
+        function populatePresetList() {
+            const listElement = document.getElementById('presetList');
+            
+            if (filteredPresets.length === 0) {
+                listElement.innerHTML = '<div class="loading">No presets found</div>';
+                return;
+            }
+            
+            listElement.innerHTML = filteredPresets.map((preset, index) => `
+                <div class="preset-item fade-in" onclick="loadPresetFromList(${presetDatabase.indexOf(preset)})" 
+                     style="animation-delay: ${index * 0.05}s">
+                    <div class="preset-name">${preset.name}</div>
+                    <div class="preset-author">by ${preset.author}</div>
+                    <div class="preset-description">${preset.description}</div>
+                </div>
+            `).join('');
+        }
+        
+        function loadPresetFromList(index) {
+            // Remove active class from all items
+            document.querySelectorAll('.preset-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            
+            // Find and activate the clicked item
+            const presetItems = document.querySelectorAll('.preset-item');
+            const filteredIndex = filteredPresets.findIndex(p => presetDatabase.indexOf(p) === index);
+            if (filteredIndex !== -1 && presetItems[filteredIndex]) {
+                presetItems[filteredIndex].classList.add('active');
+            }
+            
+            loadPreset(presetDatabase[index]);
+        }
+        
+        function loadPreset(preset) {
+            currentPresetData = preset;
+            
+            if (regl && preset.data) {
+                drawCommand = regl({
+                    vert: preset.data.vert,
+                    frag: preset.data.frag,
+                    attributes: {
+                        position: [[-1, -1], [1, -1], [-1, 1], [-1, 1], [1, -1], [1, 1]]
+                    },
+                    uniforms: {
+                        time: () => time,
+                        audioLevel: getAudioLevel,
+                        bassLevel: getBassLevel
+                    },
+                    count: 6
+                });
+            }
+            
+            document.getElementById('currentPreset').textContent = preset.name;
+            updatePresetPreview(preset);
+            updateStatus(`🎨 Loaded: ${preset.name}`);
+        }
+        
+        function updatePresetPreview(preset) {
+            const preview = document.getElementById('presetPreview');
+            preview.innerHTML = `
+                <div style="padding: 15px;">
+                    <h4 style="color: #4ecdc4; margin-bottom: 8px;">${preset.name}</h4>
+                    <p style="color: #ff6b6b; font-size: 12px; margin-bottom: 8px;">by ${preset.author}</p>
+                    <p style="color: rgba(255,255,255,0.7); font-size: 11px; line-height: 1.4;">${preset.description}</p>
+                    <div style="margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 4px;">
+                        <div style="font-size: 10px; color: rgba(255,255,255,0.5);">Category: ${preset.category}</div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function createAudioBars() {
+            const barsContainer = document.getElementById('audioBars');
+            const numBars = 20;
+            
+            for (let i = 0; i < numBars; i++) {
+                const bar = document.createElement('div');
+                bar.className = 'audio-bar';
+                bar.style.height = '10%';
+                barsContainer.appendChild(bar);
+            }
+        }
+        
+        function updateAudioBars() {
+            if (!analyser) return;
+            
+            const bars = document.querySelectorAll('.audio-bar');
+            analyser.getFloatFrequencyData(audioData);
+            
+            bars.forEach((bar, index) => {
+                const dataIndex = Math.floor((index / bars.length) * audioData.length);
+                const value = Math.max(0, (audioData[dataIndex] + 140) / 140);
+                bar.style.height = Math.max(5, value * 100) + '%';
+            });
+        }
+        
+        function getAudioLevel() {
+            if (!analyser) return 0.1;
+            
+            analyser.getFloatFrequencyData(audioData);
+            let sum = 0;
+            for (let i = 0; i < audioData.length; i++) {
+                sum += Math.max(0, (audioData[i] + 140) / 140);
+            }
+            const level = Math.max(0, Math.min(1, sum / audioData.length));
+            
+            document.getElementById('audioLevel').textContent = Math.round(level * 100) + '%';
+            updateAudioBars();
+            
+            return level;
+        }
+        
+        function getBassLevel() {
+            if (!analyser) return 0.1;
+            
+            analyser.getFloatFrequencyData(audioData);
+            let bassSum = 0;
+            const bassEnd = Math.floor(audioData.length * 0.15);
+            
+            for (let i = 0; i < bassEnd; i++) {
+                bassSum += Math.max(0, (audioData[i] + 140) / 140);
+            }
+            
+            return Math.max(0, Math.min(1, bassSum / bassEnd));
+        }
+        
+        function updateCanvas() {
+            const canvas = document.getElementById('canvas');
+            const rect = canvas.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            canvas.style.width = rect.width + 'px';
+            canvas.style.height = rect.height + 'px';
+        }
+        
+        function render() {
+            frameCount++;
+            const now = performance.now();
+            
+            if (now - lastTime >= 1000) {
+                document.getElementById('fps').textContent = frameCount;
+                frameCount = 0;
+                lastTime = now;
+            }
+            
+            time += 0.016;
+            
+            regl.clear({ color: [0, 0, 0, 1], depth: 1 });
+            
+            if (drawCommand) {
+                drawCommand();
+            }
+            
+            requestAnimationFrame(render);
+        }
+        
+        // Control functions
+        window.toggleAudio = function() {
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            
+            if (currentAudio) {
+                if (isPlaying) {
+                    currentAudio.pause();
+                    updateStatus('⏸️ Audio paused');
+                } else {
+                    currentAudio.play();
+                    updateStatus('▶️ Audio playing');
+                }
+                isPlaying = !isPlaying;
+            } else {
+                updateStatus('⚠️ No audio loaded');
+            }
+        };
+        
+        window.useMicrophone = async function() {
+            try {
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: { echoCancellation: false, noiseSuppression: false }
+                });
+                
+                const source = audioContext.createMediaStreamSource(stream);
+                connectAudioSource(source);
+                
+                updateStatus('🎤 Microphone connected');
+                
+            } catch (error) {
+                updateStatus('❌ Microphone access denied');
+            }
+        };
+        
+        function connectAudioSource(source) {
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+            analyser.smoothingTimeConstant = 0.8;
+            source.connect(analyser);
+        }
+        
+        async function handleAudioFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            try {
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                
+                if (currentAudio) {
+                    currentAudio.pause();
+                }
+                
+                const url = URL.createObjectURL(file);
+                currentAudio = new Audio(url);
+                currentAudio.loop = true;
+                currentAudio.volume = 0.8;
+                
+                const source = audioContext.createMediaElementSource(currentAudio);
+                connectAudioSource(source);
+                source.connect(audioContext.destination);
+                
+                updateStatus(`🎵 ${file.name} loaded`);
+                
+                // Update file label
+                document.querySelector('.file-input-label').textContent = `🎵 ${file.name}`;
+                
+            } catch (error) {
+                updateStatus('❌ Audio load failed');
+            }
+        }
+        
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+            console.log(message);
+        }
+        
+        // Event listeners
+        window.addEventListener('resize', updateCanvas);
+        document.addEventListener('click', () => {
+            if (audioContext && audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+        });
+        
+        // Initialize
+        window.addEventListener('load', init);
+        
+    </script>
+</body>
+</html> 

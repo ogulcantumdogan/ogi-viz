@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Butterchurn Regl Port Example</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: black;
+            font-family: Arial, sans-serif;
+            color: white;
+        }
+        
+        #canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 5px;
+        }
+        
+        button {
+            margin: 5px;
+            padding: 8px 15px;
+            background: #333;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background: #555;
+        }
+        
+        input[type="file"] {
+            margin: 5px 0;
+        }
+        
+        #info {
+            margin-top: 10px;
+            font-size: 12px;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <div id="controls">
+        <h3>Butterchurn Regl Port</h3>
+        
+        <div>
+            <label for="audioFile">Select Audio File:</label><br>
+            <input type="file" id="audioFile" accept="audio/*">
+        </div>
+        
+        <div>
+            <button onclick="loadDefaultPreset()">Load Default Preset</button>
+            <button onclick="toggleAudio()">Play/Pause</button>
+        </div>
+        
+        <div>
+            <label for="presetFile">Load Preset File:</label><br>
+            <input type="file" id="presetFile" accept=".json">
+        </div>
+        
+        <div id="info">
+            <p>Status: <span id="status">Initializing...</span></p>
+            <p>FPS: <span id="fps">0</span></p>
+        </div>
+    </div>
+
+    <!-- Include Regl -->
+    <script src="https://unpkg.com/regl@2.1.0/dist/regl.min.js"></script>
+    
+    <script type="module">
+        // Import your Regl butterchurn port
+        // Note: You'll need to build and serve your modules
+        // import { createReglVisualizer, createReglInstance } from './src/regl/index.js';
+        
+        // For this example, we'll create a mock implementation
+        let visualizer, audioContext, audio, isPlaying = false;
+        let frameCount = 0;
+        let lastTime = performance.now();
+        
+        async function initVisualizer() {
+            try {
+                // Create audio context
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                // Create Regl instance
+                const canvas = document.getElementById('canvas');
+                const regl = createREGL({
+                    canvas: canvas,
+                    attributes: {
+                        antialias: true,
+                        alpha: false,
+                        depth: false,
+                        stencil: false
+                    },
+                    extensions: [
+                        'OES_texture_float',
+                        'OES_texture_half_float',
+                        'WEBGL_color_buffer_float'
+                    ]
+                });
+                
+                // Create visualizer (you'll need to import your actual implementation)
+                // visualizer = createReglVisualizer(audioContext, regl, {
+                //     width: canvas.width,
+                //     height: canvas.height,
+                //     meshWidth: 48,
+                //     meshHeight: 36,
+                //     pixelRatio: window.devicePixelRatio,
+                //     outputFXAA: true
+                // });
+                
+                // For demo purposes, create a simple visualization
+                createDemoVisualization(regl);
+                
+                updateStatus('Visualizer initialized');
+                
+                // Start render loop
+                startRenderLoop();
+                
+            } catch (error) {
+                console.error('Failed to initialize visualizer:', error);
+                updateStatus('Initialization failed: ' + error.message);
+            }
+        }
+        
+        function createDemoVisualization(regl) {
+            // Simple demo visualization while we load the actual implementation
+            const drawCommand = regl({
+                vert: `
+                    precision mediump float;
+                    attribute vec2 position;
+                    uniform float time;
+                    varying vec2 vPos;
+                    
+                    void main() {
+                        vPos = position;
+                        vec2 pos = position;
+                        pos.x += sin(time + position.y * 10.0) * 0.1;
+                        pos.y += cos(time + position.x * 10.0) * 0.1;
+                        gl_Position = vec4(pos, 0, 1);
+                    }
+                `,
+                
+                frag: `
+                    precision mediump float;
+                    uniform float time;
+                    varying vec2 vPos;
+                    
+                    void main() {
+                        vec2 center = vec2(0.0);
+                        float dist = length(vPos - center);
+                        float wave = sin(dist * 20.0 - time * 5.0) * 0.5 + 0.5;
+                        
+                        vec3 color = vec3(
+                            sin(time + vPos.x * 5.0) * 0.5 + 0.5,
+                            cos(time + vPos.y * 5.0) * 0.5 + 0.5,
+                            wave
+                        );
+                        
+                        gl_FragColor = vec4(color, 1.0);
+                    }
+                `,
+                
+                attributes: {
+                    position: [
+                        [-1, -1], [1, -1], [-1, 1],
+                        [-1, 1], [1, -1], [1, 1]
+                    ]
+                },
+                
+                uniforms: {
+                    time: regl.context('time')
+                },
+                
+                count: 6
+            });
+            
+            visualizer = { drawCommand };
+        }
+        
+        function startRenderLoop() {
+            function render() {
+                frameCount++;
+                const currentTime = performance.now();
+                
+                // Calculate FPS
+                if (currentTime - lastTime >= 1000) {
+                    document.getElementById('fps').textContent = frameCount;
+                    frameCount = 0;
+                    lastTime = currentTime;
+                }
+                
+                // Render visualization
+                if (visualizer) {
+                    if (visualizer.render) {
+                        // Real visualizer
+                        visualizer.render();
+                    } else if (visualizer.drawCommand) {
+                        // Demo visualization
+                        visualizer.drawCommand();
+                    }
+                }
+                
+                requestAnimationFrame(render);
+            }
+            
+            render();
+        }
+        
+        // Audio handling
+        document.getElementById('audioFile').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                    
+                    // Create audio source
+                    if (audio) {
+                        audio.stop();
+                    }
+                    
+                    audio = audioContext.createBufferSource();
+                    audio.buffer = audioBuffer;
+                    audio.loop = true;
+                    
+                    // Connect to visualizer
+                    if (visualizer && visualizer.connectAudio) {
+                        visualizer.connectAudio(audio);
+                    }
+                    
+                    // Connect to speakers
+                    audio.connect(audioContext.destination);
+                    
+                    updateStatus('Audio loaded: ' + file.name);
+                    
+                } catch (error) {
+                    console.error('Failed to load audio:', error);
+                    updateStatus('Audio load failed: ' + error.message);
+                }
+            }
+        });
+        
+        // Preset handling
+        document.getElementById('presetFile').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                try {
+                    const text = await file.text();
+                    const preset = JSON.parse(text);
+                    
+                    if (visualizer && visualizer.loadPreset) {
+                        await visualizer.loadPreset(preset);
+                        updateStatus('Preset loaded: ' + file.name);
+                    } else {
+                        updateStatus('Visualizer not ready for presets');
+                    }
+                    
+                } catch (error) {
+                    console.error('Failed to load preset:', error);
+                    updateStatus('Preset load failed: ' + error.message);
+                }
+            }
+        });
+        
+        // Control functions
+        window.loadDefaultPreset = function() {
+            // Load a simple default preset
+            const defaultPreset = {
+                name: "Default",
+                baseVals: {
+                    decay: 0.98,
+                    wave_mode: 0,
+                    wave_r: 1,
+                    wave_g: 1,
+                    wave_b: 1,
+                    wave_a: 0.8
+                },
+                shapes: [],
+                waves: []
+            };
+            
+            if (visualizer && visualizer.loadPreset) {
+                visualizer.loadPreset(defaultPreset);
+                updateStatus('Default preset loaded');
+            }
+        };
+        
+        window.toggleAudio = function() {
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            
+            if (audio) {
+                if (isPlaying) {
+                    audio.stop();
+                    isPlaying = false;
+                    updateStatus('Audio paused');
+                } else {
+                    audio.start();
+                    isPlaying = true;
+                    updateStatus('Audio playing');
+                }
+            }
+        };
+        
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+            console.log('Status:', message);
+        }
+        
+        // Initialize when page loads
+        window.addEventListener('load', initVisualizer);
+        
+        // Handle canvas resize
+        function resizeCanvas() {
+            const canvas = document.getElementById('canvas');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            if (visualizer && visualizer.setRendererSize) {
+                visualizer.setRendererSize(canvas.width, canvas.height);
+            }
+        }
+        
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+    </script>
+</body>
+</html> 

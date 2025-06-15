@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Working Butterchurn Simple</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #000;
+            font-family: 'Segoe UI', sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+        
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            max-width: 350px;
+        }
+        
+        h1 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #4ecdc4;
+        }
+        
+        .preset-button {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 14px;
+        }
+        
+        .preset-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.4);
+        }
+        
+        .preset-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .audio-section {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        
+        .file-input-wrapper input[type=file] {
+            position: absolute;
+            left: -9999px;
+        }
+        
+        .file-input-label {
+            display: block;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 13px;
+        }
+        
+        .file-input-label:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: #4ecdc4;
+        }
+        
+        .audio-controls {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        
+        .secondary-button {
+            flex: 1;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            border-radius: 6px;
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 12px;
+        }
+        
+        .secondary-button:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .status {
+            margin-top: 15px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            font-size: 12px;
+            border-left: 3px solid #4ecdc4;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <div class="controls">
+        <h1>🦋 Working Butterchurn</h1>
+        <p style="font-size: 12px; color: rgba(255,255,255,0.7); margin-bottom: 15px;">
+            Real butterchurn presets with simple Regl rendering
+        </p>
+        
+        <button class="preset-button" onclick="loadPreset('experiments/wasm-eel/presets/Flexi - area 51.json')">
+            🚀 Flexi - Area 51
+        </button>
+        
+        <button class="preset-button" onclick="loadPreset('experiments/wasm-eel/presets/_Flexi, martin + geiss - painterly rogue wave strike (color emboss mix).json')">
+            🎨 Painterly Rogue Wave
+        </button>
+        
+        <div class="audio-section">
+            <div class="file-input-wrapper">
+                <input type="file" id="audioFile" accept="audio/*">
+                <label for="audioFile" class="file-input-label">
+                    🎵 Choose Audio File
+                </label>
+            </div>
+            
+            <div class="audio-controls">
+                <button class="secondary-button" onclick="toggleAudio()">▶️ Play/Pause</button>
+                <button class="secondary-button" onclick="useMicrophone()">🎤 Microphone</button>
+            </div>
+        </div>
+        
+        <div class="status" id="status">
+            Initializing Regl...
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/regl@2.1.0/dist/regl.min.js"></script>
+    
+    <script>
+        // Global variables
+        let regl;
+        let audioContext, analyser, currentAudio, isPlaying = false;
+        let time = 0;
+        let audioData = new Float32Array(1024);
+        
+        // Current preset state
+        let currentPreset = null;
+        let drawCommand = null;
+        
+        // Audio analysis
+        let audioLevel = 0.1;
+        let bassLevel = 0.1;
+        let midLevel = 0.1;
+        let trebLevel = 0.1;
+        
+        // Preset variables (butterchurn style)
+        let presetVars = {
+            time: 0,
+            bass: 0.1,
+            mid: 0.1,
+            treb: 0.1,
+            frame: 0,
+            
+            // Base values from preset
+            decay: 0.98,
+            zoom: 1.0,
+            warp: 0.0,
+            wave_r: 1.0,
+            wave_g: 1.0,
+            wave_b: 1.0,
+            wave_a: 0.8,
+            wave_x: 0.5,
+            wave_y: 0.5,
+            
+            // Pixel equation outputs
+            ib_r: 0.25,
+            ib_g: 0.25,
+            ib_b: 0.25,
+            
+            // Q variables for preset communication
+            q6: 0,
+            q7: 0
+        };
+
+        async function init() {
+            try {
+                updateStatus('🔄 Initializing Regl...');
+                
+                const canvas = document.getElementById('canvas');
+                updateCanvas();
+                
+                // Initialize WebGL with Regl
+                regl = createREGL({
+                    canvas: canvas,
+                    attributes: { antialias: true, depth: false, alpha: false }
+                });
+                
+                // Initialize Audio Context
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                updateStatus('✅ Ready! Click a preset to test');
+                
+                // Start render loop
+                render();
+                
+                // Setup audio file input
+                document.getElementById('audioFile').addEventListener('change', handleAudioFile);
+                
+            } catch (error) {
+                updateStatus('❌ Initialization failed: ' + error.message);
+                console.error('Init error:', error);
+            }
+        }
+
+        async function loadPreset(presetPath) {
+            try {
+                updateStatus(`🔄 Loading ${presetPath.split('/').pop()}...`);
+                
+                // Disable buttons during loading
+                document.querySelectorAll('.preset-button').forEach(btn => btn.disabled = true);
+                
+                // Load the butterchurn JSON directly (we know this works!)
+                const response = await fetch(presetPath);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const presetData = await response.json();
+                currentPreset = presetData;
+                
+                // Apply base values to our preset variables
+                if (presetData.baseVals) {
+                    Object.assign(presetVars, presetData.baseVals);
+                }
+                
+                // Compile frame equations if available
+                if (presetData.frame_eqs_str) {
+                    try {
+                        // Convert butterchurn JS to our format
+                        let frameCode = presetData.frame_eqs_str
+                            .replace(/a\./g, 'presetVars.')
+                            .replace(/div\(([^,]+),\s*([^)]+)\)/g, '(($1) / ($2))')
+                            .replace(/Math\./g, 'Math.');
+                        
+                        presetVars.frameFunction = new Function('presetVars', frameCode);
+                        updateStatus(`✅ Frame equations compiled`);
+                    } catch (error) {
+                        console.warn('Frame equation compilation failed:', error);
+                        presetVars.frameFunction = null;
+                    }
+                }
+                
+                // Create visualization based on preset
+                createPresetVisualization(presetData);
+                
+                updateStatus(`✅ Loaded: ${presetPath.split('/').pop()}`);
+                
+            } catch (error) {
+                updateStatus(`❌ Failed to load preset: ${error.message}`);
+                console.error('Preset load error:', error);
+            } finally {
+                // Re-enable buttons
+                document.querySelectorAll('.preset-button').forEach(btn => btn.disabled = false);
+            }
+        }
+
+        function createPresetVisualization(preset) {
+            try {
+                const baseVals = preset.baseVals || {};
+                
+                // Create shader based on preset characteristics
+                drawCommand = regl({
+                    vert: `
+                        precision mediump float;
+                        attribute vec2 position;
+                        varying vec2 vUv;
+                        
+                        void main() {
+                            vUv = position * 0.5 + 0.5;
+                            gl_Position = vec4(position, 0, 1);
+                        }
+                    `,
+                    
+                    frag: `
+                        precision mediump float;
+                        uniform float time;
+                        uniform float audioLevel, bassLevel, midLevel, trebLevel;
+                        uniform float decay, zoom, warp;
+                        uniform vec3 waveColor;
+                        uniform vec3 innerColor;
+                        uniform vec2 wavePos;
+                        uniform vec2 q_vars;
+                        varying vec2 vUv;
+                        
+                        void main() {
+                            vec2 uv = vUv;
+                            
+                            // Apply zoom
+                            uv = (uv - 0.5) * zoom + 0.5;
+                            
+                            // Apply warp effect
+                            float warpAmount = warp * audioLevel;
+                            uv += vec2(
+                                sin(time + uv.y * 10.0) * warpAmount * 0.02,
+                                cos(time + uv.x * 8.0) * warpAmount * 0.02
+                            );
+                            
+                            // Distance from center and wave position
+                            float centerDist = length(uv - 0.5);
+                            float waveDist = length(uv - wavePos);
+                            
+                            // Create patterns based on preset type
+                            float pattern1 = sin(centerDist * 20.0 - time * 3.0) * 0.5 + 0.5;
+                            float pattern2 = cos(uv.x * 15.0 + time * 2.0 + bassLevel * 5.0) * 0.5 + 0.5;
+                            float pattern3 = sin(waveDist * 25.0 - time * 4.0 + midLevel * 3.0) * 0.5 + 0.5;
+                            
+                            // Combine patterns
+                            float combined = pattern1 * 0.4 + pattern2 * 0.3 + pattern3 * 0.3;
+                            
+                            // Color mixing based on preset values
+                            vec3 color = mix(innerColor, waveColor, combined);
+                            
+                            // Add audio reactivity
+                            color += vec3(bassLevel * 0.3, midLevel * 0.2, trebLevel * 0.4);
+                            
+                            // Apply Q variable effects (from frame equations)
+                            color.r += sin(time + q_vars.x * 2.0) * audioLevel * 0.1;
+                            color.g += cos(time + q_vars.y * 3.0) * audioLevel * 0.1;
+                            
+                            // Apply decay
+                            color *= decay + audioLevel * (1.0 - decay);
+                            
+                            gl_FragColor = vec4(color, 1.0);
+                        }
+                    `,
+                    
+                    attributes: {
+                        position: [[-1, -1], [1, -1], [-1, 1], [-1, 1], [1, -1], [1, 1]]
+                    },
+                    
+                    uniforms: {
+                        time: () => time,
+                        audioLevel: () => audioLevel,
+                        bassLevel: () => bassLevel,
+                        midLevel: () => midLevel,
+                        trebLevel: () => trebLevel,
+                        decay: () => presetVars.decay || 0.98,
+                        zoom: () => presetVars.zoom || 1.0,
+                        warp: () => presetVars.warp || 0.0,
+                        waveColor: () => [
+                            presetVars.wave_r || 1.0,
+                            presetVars.wave_g || 1.0, 
+                            presetVars.wave_b || 1.0
+                        ],
+                        innerColor: () => [
+                            presetVars.ib_r || 0.25,
+                            presetVars.ib_g || 0.25,
+                            presetVars.ib_b || 0.25
+                        ],
+                        wavePos: () => [
+                            presetVars.wave_x || 0.5,
+                            presetVars.wave_y || 0.5
+                        ],
+                        q_vars: () => [presetVars.q6 || 0, presetVars.q7 || 0]
+                    },
+                    
+                    count: 6
+                });
+                
+            } catch (error) {
+                console.error('Shader creation error:', error);
+                updateStatus('⚠️ Shader compilation failed');
+            }
+        }
+
+        function updateCanvas() {
+            const canvas = document.getElementById('canvas');
+            const rect = canvas.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            canvas.style.width = rect.width + 'px';
+            canvas.style.height = rect.height + 'px';
+        }
+
+        function updateAudioAnalysis() {
+            if (!analyser) {
+                // Fallback animation when no audio
+                audioLevel = 0.2 + Math.sin(time * 2.0) * 0.1;
+                bassLevel = 0.2 + Math.cos(time * 1.5) * 0.1;
+                midLevel = 0.2 + Math.sin(time * 1.8) * 0.1;
+                trebLevel = 0.2 + Math.cos(time * 2.2) * 0.1;
+            } else {
+                analyser.getFloatFrequencyData(audioData);
+                
+                // Calculate audio levels
+                let sum = 0;
+                let bassSum = 0;
+                let midSum = 0;
+                let trebSum = 0;
+                
+                const bassEnd = Math.floor(audioData.length * 0.15);
+                const midEnd = Math.floor(audioData.length * 0.5);
+                
+                for (let i = 0; i < audioData.length; i++) {
+                    const value = Math.max(0, (audioData[i] + 140) / 140);
+                    sum += value;
+                    
+                    if (i < bassEnd) bassSum += value;
+                    else if (i < midEnd) midSum += value;
+                    else trebSum += value;
+                }
+                
+                audioLevel = Math.max(0, Math.min(1, sum / audioData.length));
+                bassLevel = Math.max(0, Math.min(1, bassSum / bassEnd));
+                midLevel = Math.max(0, Math.min(1, midSum / (midEnd - bassEnd)));
+                trebLevel = Math.max(0, Math.min(1, trebSum / (audioData.length - midEnd)));
+            }
+            
+            // Update preset variables with audio
+            presetVars.time = time;
+            presetVars.bass = bassLevel;
+            presetVars.mid = midLevel;
+            presetVars.treb = trebLevel;
+        }
+
+        function render() {
+            time += 0.016;
+            presetVars.frame++;
+            
+            // Update audio analysis
+            updateAudioAnalysis();
+            
+            // Run frame equations if available
+            if (presetVars.frameFunction) {
+                try {
+                    presetVars.frameFunction(presetVars);
+                } catch (error) {
+                    // Silently handle equation errors
+                }
+            }
+            
+            // Clear and render
+            if (regl) {
+                regl.clear({ color: [0, 0, 0, 1], depth: 1 });
+                
+                if (drawCommand) {
+                    try {
+                        drawCommand();
+                    } catch (error) {
+                        console.error('Render error:', error);
+                    }
+                }
+            }
+            
+            requestAnimationFrame(render);
+        }
+
+        // Audio control functions
+        function toggleAudio() {
+            if (audioContext && audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            
+            if (currentAudio) {
+                if (isPlaying) {
+                    currentAudio.pause();
+                    updateStatus('⏸️ Audio paused');
+                } else {
+                    currentAudio.play().catch(error => {
+                        updateStatus('❌ Play failed: ' + error.message);
+                    });
+                    updateStatus('▶️ Audio playing');
+                }
+                isPlaying = !isPlaying;
+            } else {
+                updateStatus('⚠️ No audio loaded');
+            }
+        }
+
+        async function useMicrophone() {
+            try {
+                if (audioContext && audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: { echoCancellation: false, noiseSuppression: false }
+                });
+                
+                const source = audioContext.createMediaStreamSource(stream);
+                connectAudioSource(source);
+                
+                updateStatus('🎤 Microphone connected');
+                
+            } catch (error) {
+                updateStatus('❌ Microphone access denied: ' + error.message);
+            }
+        }
+
+        function connectAudioSource(source) {
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+            analyser.smoothingTimeConstant = 0.8;
+            source.connect(analyser);
+            audioData = new Float32Array(analyser.frequencyBinCount);
+        }
+
+        async function handleAudioFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            try {
+                if (audioContext && audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                
+                if (currentAudio) {
+                    currentAudio.pause();
+                }
+                
+                const url = URL.createObjectURL(file);
+                currentAudio = new Audio(url);
+                currentAudio.loop = true;
+                currentAudio.volume = 0.8;
+                
+                const source = audioContext.createMediaElementSource(currentAudio);
+                connectAudioSource(source);
+                source.connect(audioContext.destination);
+                
+                updateStatus(`🎵 ${file.name} loaded`);
+                
+                currentAudio.play().then(() => {
+                    isPlaying = true;
+                    updateStatus(`▶️ Playing: ${file.name}`);
+                }).catch(() => {
+                    updateStatus('⚠️ Click play to start audio');
+                });
+                
+            } catch (error) {
+                updateStatus('❌ Audio load failed: ' + error.message);
+            }
+        }
+
+        function updateStatus(message) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            console.log('Status:', message);
+        }
+
+        // Event listeners
+        window.addEventListener('resize', updateCanvas);
+        window.addEventListener('click', () => {
+            if (audioContext && audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+        }, { once: true });
+
+        // Initialize when page loads
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html> 
